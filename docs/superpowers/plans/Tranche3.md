@@ -10,6 +10,10 @@
 
 **Spec:** [../specs/2026-09-16-claude-dashboard-v1-design.md](../specs/2026-09-16-claude-dashboard-v1-design.md) — sections 3.3, 3.4, 3.5, 3.9.
 
+**Procédé:** [PROCESS.md](PROCESS.md). Comme toute tranche, celle-ci commence par une **feature 00 de reconnaissance d'environnement** — signatures réelles de `getContextUsage`, `mcpServerStatus`, `supportedAgents`, `supportedCommands` extraites des `.d.ts` vers `docs/environnement.md` — et se termine par une **feature de couture** dont le mandat est de faire traverser un agrégat d'état réellement produit par le serveur jusqu'à son rendu dans le pied de page, sans double de protocole entre les deux.
+
+`npm run verify:e2e` se lance **à mi-parcours** de la tranche, pas seulement à la fin.
+
 ## Global Constraints
 
 Celles de [Tranche1.md](Tranche1.md), plus :

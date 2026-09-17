@@ -10,6 +10,10 @@
 
 **Spec:** [../specs/2026-09-16-claude-dashboard-v1-design.md](../specs/2026-09-16-claude-dashboard-v1-design.md) — sections 3.7 et 3.8.
 
+**Procédé:** [PROCESS.md](PROCESS.md). Comme toute tranche, celle-ci commence par une **feature 00 de reconnaissance d'environnement** — signatures réelles des méthodes de contrôle utilisées entre les étapes d'un workflow, et forme exacte de `SDKControlInterruptResponse` dont l'accusé de réception devient utile ici — et se termine par une **feature de couture** dont le mandat est de faire traverser un workflow complet, du lancement jusqu'aux checkpoints rendus dans le fil, en franchissant une barrière.
+
+`npm run verify:e2e` se lance **à mi-parcours** de la tranche, pas seulement à la fin.
+
 ## Global Constraints
 
 Celles de [Tranche1.md](Tranche1.md), plus :
