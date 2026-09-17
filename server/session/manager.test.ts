@@ -101,3 +101,87 @@ test('les appels d outils ne produisent jamais de message de conversation', asyn
 
   await manager.stop();
 });
+
+test('interrompre laisse la session utilisable', async () => {
+  const events: ServerEvent[] = [];
+  const interruptCalls: number[] = [];
+  const userTexts: string[] = [];
+
+  const query = ({ prompt }: { prompt: unknown }) => {
+    const iterable = prompt as AsyncIterable<{ message: { content: unknown } }>;
+
+    const generator = (async function* () {
+      for await (const userMessage of iterable) {
+        const content = userMessage.message.content;
+        userTexts.push(typeof content === 'string' ? content : '');
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: `vu ${userTexts.length}` }] },
+          uuid: `m${userTexts.length}`,
+          session_id: 's1',
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          total_cost_usd: 0.01,
+          session_id: 's1',
+          uuid: `r${userTexts.length}`,
+        };
+      }
+    })();
+
+    return Object.assign(generator, {
+      interrupt: async () => {
+        interruptCalls.push(Date.now());
+        return undefined;
+      },
+    });
+  };
+
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => events.push(e),
+    queryFn: query as never,
+  });
+
+  manager.send('premier');
+  await new Promise((r) => setTimeout(r, 20));
+
+  await manager.interrupt();
+  assert.equal(interruptCalls.length, 1);
+
+  manager.send('apres interruption');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(userTexts, ['premier', 'apres interruption']);
+  assert.equal(manager.state().status, 'idle');
+
+  await manager.stop();
+});
+
+test('le statut passe à generating puis revient à idle', async () => {
+  const states: string[] = [];
+  const { query } = fakeQuery(() => [
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'ok' }] },
+      uuid: 'm1',
+      session_id: 's1',
+    },
+    { type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' },
+  ]);
+
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => {
+      if (e.type === 'session.state') states.push(e.state.status);
+    },
+    queryFn: query,
+  });
+
+  manager.send('salut');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(states, ['generating', 'idle']);
+  await manager.stop();
+});
