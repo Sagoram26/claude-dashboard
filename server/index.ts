@@ -78,7 +78,13 @@ if (isEntrypoint) {
     onCommand: (cmd) => {
       if (!manager) return;
       if (cmd.type === 'message.send') manager.send(cmd.text);
-      if (cmd.type === 'session.interrupt') void manager.interrupt();
+      if (cmd.type === 'session.interrupt') {
+        // Filet de sécurité : manager.interrupt() gère déjà l'échec en interne (voir manager.ts),
+        // mais un rejet non capturé ici ferait tomber le processus par défaut.
+        manager.interrupt().catch((err: unknown) => {
+          server.broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+        });
+      }
     },
   });
 

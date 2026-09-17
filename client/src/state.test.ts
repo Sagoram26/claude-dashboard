@@ -38,6 +38,20 @@ test('message.complete fige le texte et arrête le streaming', () => {
   });
 });
 
+test('un événement error est retenu dans l état, sans créer de message', () => {
+  const state = reduceEvent(initialState, { type: 'error', message: 'clé API absente' });
+
+  expect(state.messages).toEqual([]);
+  expect(state.error).toBe('clé API absente');
+});
+
+test('un nouvel événement error remplace le précédent', () => {
+  let state = reduceEvent(initialState, { type: 'error', message: 'premier' });
+  state = reduceEvent(state, { type: 'error', message: 'second' });
+
+  expect(state.error).toBe('second');
+});
+
 test('un appel d outil ne crée aucun message', () => {
   const state = reduceEvent(initialState, {
     type: 'tool.activity',

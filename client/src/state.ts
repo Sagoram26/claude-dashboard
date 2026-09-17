@@ -11,12 +11,14 @@ export type AppState = {
   messages: ChatMessage[];
   status: SessionState['status'];
   toolActivityCount: number;
+  error: string | null;
 };
 
 export const initialState: AppState = {
   messages: [],
   status: 'idle',
   toolActivityCount: 0,
+  error: null,
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -59,7 +61,23 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
     case 'session.state':
       return { ...state, status: event.state.status };
 
-    default:
+    case 'error':
+      return { ...state, error: event.message };
+
+    // Événements de protocole encore sans consommateur en tranche 1 (livrés en T2-T4). Listés
+    // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
+    case 'permission.request':
+    case 'permission.resolved':
+    case 'workflow.checkpoint':
+    case 'files.changed':
+    case 'git.state':
+    case 'context.usage':
+    case 'cost.usage':
       return state;
+
+    default: {
+      const exhaustive: never = event;
+      return exhaustive;
+    }
   }
 }

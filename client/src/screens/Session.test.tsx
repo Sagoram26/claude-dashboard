@@ -104,6 +104,27 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
   expect(sent).toContain(JSON.stringify({ type: 'session.interrupt' }));
 });
 
+test('un événement error affiche un bandeau visible dans la conversation', async () => {
+  const listeners: ((e: { data: string }) => void)[] = [];
+
+  class FakeWebSocket {
+    readyState = 1;
+    set onmessage(fn: (e: { data: string }) => void) { listeners.push(fn); }
+    send() {}
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+
+  listeners[0]?.({
+    data: JSON.stringify({ type: 'error', message: 'clé API absente' }),
+  });
+
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('clé API absente');
+});
+
 test('l indicateur est absent au repos', () => {
   class FakeWebSocket {
     readyState = 1;

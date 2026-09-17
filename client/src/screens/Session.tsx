@@ -55,7 +55,7 @@ export function Session() {
             minHeight: 0,
           }}
         >
-          <Conversation messages={state.messages} />
+          <Conversation messages={state.messages} error={state.error} />
           {state.status === 'generating' && (
             <GeneratingIndicator
               onInterrupt={() => connection.current?.send({ type: 'session.interrupt' })}

@@ -8,6 +8,8 @@ class FakeWebSocket {
   readyState = 1;
   onmessage: ((e: { data: string }) => void) | null = null;
   onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this);
@@ -35,6 +37,33 @@ test('sérialise les commandes envoyées', () => {
 
   const socket = FakeWebSocket.instances.at(-1);
   expect(socket?.sent).toEqual([JSON.stringify({ type: 'message.send', text: 'salut' })]);
+});
+
+test('une fermeture de connexion produit un statut disconnected', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  const seen: ServerEvent[] = [];
+
+  connect('ws://test/ws', (event) => seen.push(event));
+  const socket = FakeWebSocket.instances.at(-1);
+  socket?.onclose?.();
+
+  expect(seen).toHaveLength(1);
+  const [event] = seen;
+  expect(event?.type).toBe('session.state');
+  expect(event?.type === 'session.state' && event.state.status).toBe('disconnected');
+});
+
+test('une erreur de connexion produit un statut disconnected', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  const seen: ServerEvent[] = [];
+
+  connect('ws://test/ws', (event) => seen.push(event));
+  const socket = FakeWebSocket.instances.at(-1);
+  socket?.onerror?.();
+
+  expect(seen).toHaveLength(1);
+  const [event] = seen;
+  expect(event?.type === 'session.state' && event.state.status).toBe('disconnected');
 });
 
 test('ignore un message serveur illisible', () => {

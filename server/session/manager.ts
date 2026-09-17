@@ -146,7 +146,11 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     },
 
     async interrupt() {
-      await session.interrupt();
+      try {
+        await session.interrupt();
+      } catch (err) {
+        emitError(err);
+      }
       setState({ status: 'idle' });
     },
 

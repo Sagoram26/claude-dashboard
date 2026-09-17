@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../state.ts';
 
-export function Conversation({ messages }: { messages: ChatMessage[] }) {
+export function Conversation({ messages, error }: { messages: ChatMessage[]; error: string | null }) {
   return (
     <div
       style={{
@@ -13,6 +13,20 @@ export function Conversation({ messages }: { messages: ChatMessage[] }) {
         padding: '16px 0',
       }}
     >
+      {error !== null && (
+        <div
+          role="alert"
+          style={{
+            fontSize: 12,
+            color: 'var(--danger)',
+            border: '1px solid var(--danger)',
+            borderRadius: 'var(--radius-control)',
+            padding: '6px 8px',
+          }}
+        >
+          {error}
+        </div>
+      )}
       {messages.map((message) => (
         <article
           key={message.id}

@@ -162,6 +162,36 @@ test('interrompre laisse la session utilisable', async () => {
   await manager.stop();
 });
 
+test('un rejet de interrupt() émet une erreur au lieu de faire tomber le processus', async () => {
+  const events: ServerEvent[] = [];
+
+  const query = ({ prompt }: { prompt: unknown }) => {
+    const iterable = prompt as AsyncIterable<{ message: { content: unknown } }>;
+    const generator = (async function* () {
+      for await (const _userMessage of iterable) {
+        // ne répond jamais : on veut juste garder la session en vie
+      }
+    })();
+
+    return Object.assign(generator, {
+      interrupt: async () => {
+        throw new Error('aucun tour en vol');
+      },
+    });
+  };
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query as never });
+
+  await manager.interrupt();
+
+  const error = events.find((e) => e.type === 'error');
+  assert.ok(error && error.type === 'error');
+  assert.equal(error.message, 'aucun tour en vol');
+  assert.equal(manager.state().status, 'idle');
+
+  await manager.stop();
+});
+
 test('le statut passe à generating puis revient à idle', async () => {
   const states: string[] = [];
   const { query } = fakeQuery(() => [
