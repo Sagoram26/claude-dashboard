@@ -67,6 +67,25 @@ export async function createServer(
 
 const isEntrypoint = process.argv[1]?.endsWith('index.ts');
 if (isEntrypoint) {
-  const server = await createServer(4317);
+  const { createSessionManager } = await import('./session/manager.ts');
+
+  let manager: ReturnType<typeof createSessionManager> | null = null;
+
+  const server = await createServer(4317, {
+    onConnect: (send) => {
+      if (manager) send({ type: 'session.state', state: manager.state() });
+    },
+    onCommand: (cmd) => {
+      if (!manager) return;
+      if (cmd.type === 'message.send') manager.send(cmd.text);
+      if (cmd.type === 'session.interrupt') void manager.interrupt();
+    },
+  });
+
+  manager = createSessionManager({
+    cwd: process.cwd(),
+    emit: (event) => server.broadcast(event),
+  });
+
   console.log(`server listening on http://127.0.0.1:${server.port}`);
 }
