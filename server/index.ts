@@ -1,10 +1,17 @@
 import { createServer as createHttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { parseClientCommand, type ClientCommand, type ServerEvent } from './protocol.ts';
 
-export async function createServer(port: number): Promise<{
-  close: () => Promise<void>;
-  port: number;
-}> {
+export type ServerHandlers = {
+  onCommand?: (cmd: ClientCommand, send: (event: ServerEvent) => void) => void;
+  onConnect?: (send: (event: ServerEvent) => void) => void;
+};
+
+export async function createServer(
+  port: number,
+  handlers: ServerHandlers = {}
+): Promise<{ close: () => Promise<void>; port: number; broadcast: (e: ServerEvent) => void }> {
   const http = createHttpServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -15,14 +22,46 @@ export async function createServer(port: number): Promise<{
     res.end();
   });
 
+  const wss = new WebSocketServer({ server: http, path: '/ws' });
+  const clients = new Set<WebSocket>();
+
+  const broadcast = (event: ServerEvent) => {
+    const payload = JSON.stringify(event);
+    for (const client of clients) {
+      if (client.readyState === client.OPEN) client.send(payload);
+    }
+  };
+
+  wss.on('connection', (socket) => {
+    clients.add(socket);
+    const send = (event: ServerEvent) => {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
+    };
+
+    handlers.onConnect?.(send);
+
+    socket.on('message', (data) => {
+      const cmd = parseClientCommand(data.toString());
+      if (!cmd) return;
+      handlers.onCommand?.(cmd, send);
+    });
+
+    socket.on('close', () => clients.delete(socket));
+  });
+
   await new Promise<void>((resolve) => http.listen(port, '127.0.0.1', resolve));
   const bound = http.address() as AddressInfo;
 
   return {
     port: bound.port,
-    close: () => new Promise<void>((resolve, reject) =>
-      http.close((err) => (err ? reject(err) : resolve()))
-    ),
+    broadcast,
+    close: async () => {
+      for (const client of clients) client.terminate();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve, reject) =>
+        http.close((err) => (err ? reject(err) : resolve()))
+      );
+    },
   };
 }
 
