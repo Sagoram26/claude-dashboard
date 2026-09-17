@@ -1,6 +1,7 @@
 import { test, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Session } from './Session.tsx';
+import { FakeWebSocket } from '../test-doubles.ts';
 
 test('affiche les trois régions fixes', () => {
   render(<Session />);
@@ -23,20 +24,12 @@ test('le pied de page porte de l état, pas de bouton', () => {
 });
 
 test('un message reçu apparaît dans la conversation', async () => {
-  const listeners: ((e: { data: string }) => void)[] = [];
-
-  class FakeWebSocket {
-    readyState = 1;
-    sent: string[] = [];
-    set onmessage(fn: (e: { data: string }) => void) { listeners.push(fn); }
-    send(payload: string) { this.sent.push(payload); }
-    close() {}
-  }
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
   render(<Session />);
 
-  listeners[0]?.({
+  const socket = FakeWebSocket.instances.at(-1);
+  socket?.onmessage?.({
     data: JSON.stringify({
       type: 'message.complete',
       messageId: 'm1',
@@ -49,19 +42,12 @@ test('un message reçu apparaît dans la conversation', async () => {
 });
 
 test('un appel d outil ne rend rien dans la conversation', () => {
-  const listeners: ((e: { data: string }) => void)[] = [];
-
-  class FakeWebSocket {
-    readyState = 1;
-    set onmessage(fn: (e: { data: string }) => void) { listeners.push(fn); }
-    send() {}
-    close() {}
-  }
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
   render(<Session />);
 
-  listeners[0]?.({
+  const socket = FakeWebSocket.instances.at(-1);
+  socket?.onmessage?.({
     data: JSON.stringify({ type: 'tool.activity', toolUseId: 't1', name: 'Bash', target: 'ls' }),
   });
 
@@ -70,21 +56,13 @@ test('un appel d outil ne rend rien dans la conversation', () => {
 });
 
 test('l indicateur de génération apparaît et permet d interrompre', () => {
-  const sent: string[] = [];
-  const listeners: ((e: { data: string }) => void)[] = [];
-
-  class FakeWebSocket {
-    readyState = 1;
-    set onmessage(fn: (e: { data: string }) => void) { listeners.push(fn); }
-    send(payload: string) { sent.push(payload); }
-    close() {}
-  }
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
   render(<Session />);
 
+  const socket = FakeWebSocket.instances.at(-1);
   act(() => {
-    listeners[0]?.({
+    socket?.onmessage?.({
       data: JSON.stringify({
         type: 'session.state',
         state: {
@@ -101,23 +79,16 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
   const button = screen.getByRole('button', { name: /interrompre/i });
   fireEvent.click(button);
 
-  expect(sent).toContain(JSON.stringify({ type: 'session.interrupt' }));
+  expect(socket?.sent).toContain(JSON.stringify({ type: 'session.interrupt' }));
 });
 
 test('un événement error affiche un bandeau visible dans la conversation', async () => {
-  const listeners: ((e: { data: string }) => void)[] = [];
-
-  class FakeWebSocket {
-    readyState = 1;
-    set onmessage(fn: (e: { data: string }) => void) { listeners.push(fn); }
-    send() {}
-    close() {}
-  }
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
   render(<Session />);
 
-  listeners[0]?.({
+  const socket = FakeWebSocket.instances.at(-1);
+  socket?.onmessage?.({
     data: JSON.stringify({ type: 'error', message: 'clé API absente' }),
   });
 
@@ -126,12 +97,6 @@ test('un événement error affiche un bandeau visible dans la conversation', asy
 });
 
 test('l indicateur est absent au repos', () => {
-  class FakeWebSocket {
-    readyState = 1;
-    set onmessage(_fn: (e: { data: string }) => void) {}
-    send() {}
-    close() {}
-  }
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
   render(<Session />);

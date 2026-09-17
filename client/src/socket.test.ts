@@ -1,23 +1,7 @@
 import { test, expect, vi } from 'vitest';
 import { connect } from './socket.ts';
 import type { ServerEvent } from '../../server/protocol.ts';
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  sent: string[] = [];
-  readyState = 1;
-  onmessage: ((e: { data: string }) => void) | null = null;
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  send(payload: string) { this.sent.push(payload); }
-  close() { this.readyState = 3; }
-}
+import { FakeWebSocket } from './test-doubles.ts';
 
 test('transmet les événements reçus au callback', () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
