@@ -388,8 +388,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
         type: 'user',
         message: { role: 'user', content: text },
         parent_tool_use_id: null,
-        session_id: state.sessionId ?? '',
-      } as SDKUserMessage);
+      });
     },
 
     async interrupt() {
@@ -408,6 +407,12 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
 ```
 
 Le `cost.usage` est émis dès maintenant parce qu'il vient gratuitement avec le `result` ; le pied de page le consommera en tranche 3.
+
+Deux points vérifiés contre les types réels du SDK, à ne pas réécrire autrement :
+
+`SDKUserMessage` ne porte **pas** de `session_id` à la racine — le SDK dérive la session du flux `prompt` lui-même, pas d'un champ par message. Ne pas en ajouter un, et ne pas écrire d'assertion `as SDKUserMessage` : elle masquerait la propriété excédentaire au lieu de la signaler.
+
+Le narrowing sur les messages système doit être `message.type === 'system' && message.subtype === 'init'`. Plusieurs membres de l'union `SDKMessage` partagent `type: 'system'` sans porter de champ `model` — `SDKCommandsChangedMessage`, `SDKCompactBoundaryMessage`, `SDKBackgroundTasksChangedMessage` entre autres.
 
 - [ ] **Step 9: Lancer le test pour vérifier qu'il passe**
 
