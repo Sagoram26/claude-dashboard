@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "node --experimental-strip-types --test server/**/*.test.ts",
-    "test:client": "vitest run"
+    "test:client": "vitest run",
+    "verify:e2e": "node scripts/verify-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.274",

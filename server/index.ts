@@ -71,7 +71,7 @@ if (isEntrypoint) {
 
   let manager: ReturnType<typeof createSessionManager> | null = null;
 
-  const server = await createServer(4317, {
+  const server = await createServer(Number(process.env.PORT ?? 4317), {
     onConnect: (send) => {
       if (manager) send({ type: 'session.state', state: manager.state() });
     },
