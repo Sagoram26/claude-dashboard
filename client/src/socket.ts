@@ -35,7 +35,7 @@ export function connect(url: string, onEvent: (event: ServerEvent) => void): Con
 
   return {
     send(command) {
-      if (socket.readyState === 1 /* WebSocket.OPEN */) socket.send(JSON.stringify(command));
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
     },
     close() {
       socket.close();
