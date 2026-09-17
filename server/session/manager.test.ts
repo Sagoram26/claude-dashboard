@@ -273,3 +273,57 @@ test('les fragments non textuels ne produisent aucun delta', async () => {
   await manager.stop();
 });
 
+test('le message de l utilisateur est diffusé dès son envoi', async () => {
+  const events: ServerEvent[] = [];
+  const { query } = fakeQuery(() => [
+    {
+      type: 'assistant',
+      message: { id: 'msg_1', content: [{ type: 'text', text: 'bonjour' }] },
+      uuid: 'm1',
+      session_id: 's1',
+    },
+    { type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' },
+  ]);
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  manager.send('salut');
+
+  const echo = events.find((e) => e.type === 'message.complete');
+  assert.ok(echo && echo.type === 'message.complete');
+  assert.equal(echo.role, 'user');
+  assert.equal(echo.text, 'salut');
+  assert.ok(echo.messageId.length > 0);
+
+  manager.send('encore');
+  const echoIds = events.flatMap((e) =>
+    e.type === 'message.complete' && e.role === 'user' ? [e.messageId] : []
+  );
+  assert.equal(echoIds.length, 2);
+  assert.notEqual(echoIds[0], echoIds[1]);
+
+  await new Promise((r) => setTimeout(r, 20));
+  await manager.stop();
+});
+
+test('aucun session_id n est poussé dans le message utilisateur', async () => {
+  const pushed: Record<string, unknown>[] = [];
+
+  const query = ({ prompt }: { prompt: unknown }) => {
+    const iterable = prompt as AsyncIterable<Record<string, unknown>>;
+    return (async function* () {
+      for await (const userMessage of iterable) {
+        pushed.push(userMessage);
+        yield { type: 'result', subtype: 'success', total_cost_usd: 0, session_id: 's1', uuid: 'r1' };
+      }
+    })();
+  };
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query as never });
+  manager.send('salut');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(pushed.length, 1);
+  assert.ok(pushed[0] && !('session_id' in pushed[0]));
+
+  await manager.stop();
+});

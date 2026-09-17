@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { query as realQuery } from '@anthropic-ai/claude-agent-sdk';
 import type {
   SDKMessage,
@@ -135,12 +136,13 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
   return {
     send(text: string) {
       setState({ status: 'generating' });
+      // Le serveur pousse l'état : l'écho du message utilisateur vient d'ici, pas du client.
+      opts.emit({ type: 'message.complete', messageId: randomUUID(), role: 'user', text });
       queue.push({
         type: 'user',
         message: { role: 'user', content: text },
         parent_tool_use_id: null,
-        session_id: state.sessionId ?? '',
-      } as SDKUserMessage);
+      });
     },
 
     async interrupt() {
