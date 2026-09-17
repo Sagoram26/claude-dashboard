@@ -49,3 +49,19 @@ test('un appel d outil ne crée aucun message', () => {
   expect(state.messages).toEqual([]);
   expect(state.toolActivityCount).toBe(1);
 });
+
+test('une séquence de deltas suivie du complete ne produit qu un seul message', () => {
+  const messageId = 'msg_1';
+  let state = reduceEvent(initialState, { type: 'message.delta', messageId, text: 'bon' });
+  state = reduceEvent(state, { type: 'message.delta', messageId, text: 'jour' });
+  state = reduceEvent(state, {
+    type: 'message.complete',
+    messageId,
+    role: 'assistant',
+    text: 'bonjour',
+  });
+
+  expect(state.messages).toEqual([
+    { id: messageId, role: 'assistant', text: 'bonjour', streaming: false },
+  ]);
+});

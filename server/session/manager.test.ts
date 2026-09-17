@@ -5,8 +5,10 @@ import type { ServerEvent } from '../protocol.ts';
 
 function fakeQuery(scenario: (userTexts: string[]) => unknown[]) {
   const userTexts: string[] = [];
+  let seenOptions: Record<string, unknown> | undefined;
 
-  const query = ({ prompt }: { prompt: unknown }) => {
+  const query = ({ prompt, options }: { prompt: unknown; options?: Record<string, unknown> }) => {
+    seenOptions = options;
     const iterable = prompt as AsyncIterable<{ message: { content: unknown } }>;
 
     return (async function* () {
@@ -18,7 +20,7 @@ function fakeQuery(scenario: (userTexts: string[]) => unknown[]) {
     })();
   };
 
-  return { query: query as never, userTexts };
+  return { query: query as never, userTexts, options: () => seenOptions };
 }
 
 test('un message envoyé atteint le SDK et sa réponse est diffusée', async () => {
@@ -26,7 +28,7 @@ test('un message envoyé atteint le SDK et sa réponse est diffusée', async () 
   const { query, userTexts } = fakeQuery(() => [
     {
       type: 'assistant',
-      message: { content: [{ type: 'text', text: 'bonjour' }] },
+      message: { id: 'msg_1', content: [{ type: 'text', text: 'bonjour' }] },
       uuid: 'm1',
       session_id: 's1',
     },
@@ -38,7 +40,7 @@ test('un message envoyé atteint le SDK et sa réponse est diffusée', async () 
   await new Promise((r) => setTimeout(r, 20));
 
   assert.deepEqual(userTexts, ['salut']);
-  const complete = events.find((e) => e.type === 'message.complete');
+  const complete = events.find((e) => e.type === 'message.complete' && e.role === 'assistant');
   assert.ok(complete && complete.type === 'message.complete');
   assert.equal(complete.text, 'bonjour');
 
@@ -50,7 +52,7 @@ test('deux messages successifs restent dans la même session', async () => {
   const { query, userTexts } = fakeQuery((texts) => [
     {
       type: 'assistant',
-      message: { content: [{ type: 'text', text: `reponse ${texts.length}` }] },
+      message: { id: `msg_${texts.length}`, content: [{ type: 'text', text: `reponse ${texts.length}` }] },
       uuid: `m${texts.length}`,
       session_id: 's1',
     },
@@ -65,7 +67,7 @@ test('deux messages successifs restent dans la même session', async () => {
   await new Promise((r) => setTimeout(r, 20));
 
   assert.deepEqual(userTexts, ['premier', 'second']);
-  const completes = events.filter((e) => e.type === 'message.complete');
+  const completes = events.filter((e) => e.type === 'message.complete' && e.role === 'assistant');
   assert.equal(completes.length, 2);
 
   await manager.stop();
@@ -77,6 +79,7 @@ test('les appels d outils ne produisent jamais de message de conversation', asyn
     {
       type: 'assistant',
       message: {
+        id: 'msg_1',
         content: [
           { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
           { type: 'text', text: 'voila' },
@@ -92,7 +95,7 @@ test('les appels d outils ne produisent jamais de message de conversation', asyn
   manager.send('fais quelque chose');
   await new Promise((r) => setTimeout(r, 20));
 
-  const complete = events.find((e) => e.type === 'message.complete');
+  const complete = events.find((e) => e.type === 'message.complete' && e.role === 'assistant');
   assert.ok(complete && complete.type === 'message.complete');
   assert.equal(complete.text, 'voila');
 
@@ -116,7 +119,7 @@ test('interrompre laisse la session utilisable', async () => {
         userTexts.push(typeof content === 'string' ? content : '');
         yield {
           type: 'assistant',
-          message: { content: [{ type: 'text', text: `vu ${userTexts.length}` }] },
+          message: { id: `msg_${userTexts.length}`, content: [{ type: 'text', text: `vu ${userTexts.length}` }] },
           uuid: `m${userTexts.length}`,
           session_id: 's1',
         };
@@ -164,7 +167,7 @@ test('le statut passe à generating puis revient à idle', async () => {
   const { query } = fakeQuery(() => [
     {
       type: 'assistant',
-      message: { content: [{ type: 'text', text: 'ok' }] },
+      message: { id: 'msg_1', content: [{ type: 'text', text: 'ok' }] },
       uuid: 'm1',
       session_id: 's1',
     },
@@ -185,3 +188,88 @@ test('le statut passe à generating puis revient à idle', async () => {
   assert.deepEqual(states, ['generating', 'idle']);
   await manager.stop();
 });
+
+test('les fragments partiels produisent des message.delta sous le même identifiant que le complete', async () => {
+  const events: ServerEvent[] = [];
+  const { query, options } = fakeQuery(() => [
+    {
+      type: 'stream_event',
+      uuid: 'e1',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      event: { type: 'message_start', message: { id: 'msg_1', content: [] } },
+    },
+    {
+      type: 'stream_event',
+      uuid: 'e2',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'bon' } },
+    },
+    {
+      type: 'stream_event',
+      uuid: 'e3',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'jour' } },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg_1', content: [{ type: 'text', text: 'bonjour' }] },
+      uuid: 'm1',
+      session_id: 's1',
+    },
+    { type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' },
+  ]);
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  manager.send('salut');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(options()?.includePartialMessages, true);
+
+  const deltas = events.filter((e) => e.type === 'message.delta');
+  assert.deepEqual(
+    deltas.map((e) => e.text),
+    ['bon', 'jour']
+  );
+
+  const complete = events.find((e) => e.type === 'message.complete' && e.role === 'assistant');
+  assert.ok(complete && complete.type === 'message.complete');
+  for (const delta of deltas) assert.equal(delta.messageId, complete.messageId);
+
+  await manager.stop();
+});
+
+test('les fragments non textuels ne produisent aucun delta', async () => {
+  const events: ServerEvent[] = [];
+  const { query } = fakeQuery(() => [
+    {
+      type: 'stream_event',
+      uuid: 'e1',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      event: { type: 'message_start', message: { id: 'msg_1', content: [] } },
+    },
+    {
+      type: 'stream_event',
+      uuid: 'e2',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"a":' },
+      },
+    },
+    { type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' },
+  ]);
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  manager.send('salut');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(events.filter((e) => e.type === 'message.delta').length, 0);
+  await manager.stop();
+});
+

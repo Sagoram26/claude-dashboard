@@ -30,14 +30,23 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     permissionMode: null,
   };
 
+  // Identifiant du message assistant en cours de streaming. C'est l'id de message de l'API
+  // (message_start), le même que celui porté par le SDKAssistantMessage final : les deltas et le
+  // complete doivent coïncider, sinon le client affiche le texte deux fois.
+  let streamingMessageId: string | null = null;
+
   const setState = (patch: Partial<SessionState>) => {
     state = { ...state, ...patch };
     opts.emit({ type: 'session.state', state });
   };
 
+  const emitError = (err: unknown) => {
+    opts.emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+  };
+
   const session = queryFn({
     prompt: queue.stream,
-    options: { cwd: opts.cwd },
+    options: { cwd: opts.cwd, includePartialMessages: true },
   });
 
   const pump = (async () => {
@@ -45,13 +54,18 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       handleMessage(message);
     }
   })().catch((err: unknown) => {
-    opts.emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+    emitError(err);
     setState({ status: 'disconnected' });
   });
 
   function handleMessage(message: SDKMessage): void {
     if (message.type === 'system' && message.subtype === 'init') {
       setState({ sessionId: message.session_id, model: message.model ?? null });
+      return;
+    }
+
+    if (message.type === 'stream_event') {
+      handleStreamEvent(message.event);
       return;
     }
 
@@ -76,7 +90,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       if (texts.length > 0) {
         opts.emit({
           type: 'message.complete',
-          messageId: message.uuid,
+          messageId: message.message.id,
           role: 'assistant',
           text: texts.join('\n'),
         });
@@ -85,11 +99,32 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     }
 
     if (message.type === 'result') {
+      streamingMessageId = null;
       setState({ status: 'idle', sessionId: message.session_id });
       if ('total_cost_usd' in message) {
         opts.emit({ type: 'cost.usage', totalUsd: message.total_cost_usd });
       }
     }
+  }
+
+  function handleStreamEvent(event: { type: string } & Record<string, unknown>): void {
+    if (event.type === 'message_start') {
+      const started = event.message;
+      if (typeof started === 'object' && started !== null && 'id' in started) {
+        const id = (started as { id: unknown }).id;
+        if (typeof id === 'string') streamingMessageId = id;
+      }
+      return;
+    }
+
+    if (event.type !== 'content_block_delta' || streamingMessageId === null) return;
+
+    const delta = event.delta;
+    if (typeof delta !== 'object' || delta === null) return;
+    const candidate = delta as { type?: unknown; text?: unknown };
+    if (candidate.type !== 'text_delta' || typeof candidate.text !== 'string') return;
+
+    opts.emit({ type: 'message.delta', messageId: streamingMessageId, text: candidate.text });
   }
 
   function describeTarget(input: unknown): string | undefined {
