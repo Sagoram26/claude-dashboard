@@ -6,13 +6,13 @@
 
 **Architecture:** Un serveur Node local héberge le harnais via `@anthropic-ai/claude-agent-sdk` et expose un WebSocket. Le serveur pousse de l'état, le client pousse des intentions. Une file de messages alimente un `AsyncIterable<SDKUserMessage>` passé en `prompt` à `query()`, ce qui maintient la session ouverte entre les tours.
 
-**Tech Stack:** Node 20+, TypeScript strict, `ws`, Vite + React, `node:test` côté serveur, Vitest côté client.
+**Tech Stack:** Node 22.6+, TypeScript strict, `ws`, Vite + React, `node:test` côté serveur, Vitest côté client.
 
 **Spec:** [../specs/2026-09-16-claude-dashboard-v1-design.md](../specs/2026-09-16-claude-dashboard-v1-design.md)
 
 ## Global Constraints
 
-- Node 20 ou supérieur. TypeScript en mode `strict`.
+- Node 22.6 ou supérieur (`--experimental-strip-types` et le glob récursif de `node --test` l'exigent). TypeScript en mode `strict`.
 - Dépendances de production autorisées : `@anthropic-ai/claude-agent-sdk`, `ws`, `react`, `react-dom`. Aucune autre sans justification écrite. Pas de framework serveur, pas de bibliothèque d'état, pas de librairie de composants.
 - `server/protocol.ts` est le contrat unique partagé serveur/client. Les deux côtés l'importent ; une divergence doit être une erreur de compilation.
 - Les appels d'outils n'apparaissent JAMAIS dans la colonne de conversation. Contrainte de construction, pas de discipline.

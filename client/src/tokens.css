@@ -26,6 +26,26 @@
   --radius-card: 7px;
 }
 
+/* Thème clair par défaut système, sauf si data-theme force explicitement dark ou light. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #ffffff;
+    --surface: #f7f8f9;
+    --surface-raised: #ffffff;
+    --border: #e3e5e8;
+    --border-strong: #c9ccd1;
+    --text: #16181b;
+    --text-muted: #5c6269;
+    --text-faint: #8a9098;
+    --accent: #3558d4;
+    --accent-soft: rgba(53, 88, 212, 0.09);
+    --warn: #b4741a;
+    --warn-soft: rgba(180, 116, 26, 0.09);
+    --ok: #2f8f42;
+    --danger: #c0392f;
+  }
+}
+
 :root[data-theme='light'] {
   --bg: #ffffff;
   --surface: #f7f8f9;
