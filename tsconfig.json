@@ -9,7 +9,9 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client"]
   },
   "include": ["client/src", "server/protocol.ts", "vite.config.ts"]
 }
