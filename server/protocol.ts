@@ -59,7 +59,7 @@ export type ContextUsage = {
   categories: { name: string; tokens: number }[];
 };
 
-const COMMAND_VALIDATORS: Record<string, (v: Record<string, unknown>) => boolean> = {
+const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unknown>) => boolean> = {
   'message.send': (v) => typeof v.text === 'string' && v.text.length > 0,
   'session.interrupt': () => true,
   'runtime.set': (v) =>
@@ -87,7 +87,7 @@ export function parseClientCommand(raw: string): ClientCommand | null {
   const type = candidate.type;
   if (typeof type !== 'string') return null;
 
-  const validate = COMMAND_VALIDATORS[type];
+  const validate = COMMAND_VALIDATORS[type as ClientCommand['type']];
   if (!validate || !validate(candidate)) return null;
 
   return candidate as unknown as ClientCommand;
