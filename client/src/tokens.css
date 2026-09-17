@@ -77,3 +77,20 @@ body {
 .pill[data-dashed='true'] { border-style: dashed; }
 
 .mono { font-family: var(--font-mono); }
+
+.generating-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--accent);
+  animation: generating-pulse 2s ease-in-out infinite;
+}
+
+@keyframes generating-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generating-dot { animation: none; }
+}

@@ -3,6 +3,7 @@ import { TopBar, type ControlPill } from '../components/TopBar.tsx';
 import { Footer, type FooterItem } from '../components/Footer.tsx';
 import { Conversation } from '../components/Conversation.tsx';
 import { Composer } from '../components/Composer.tsx';
+import { GeneratingIndicator } from '../components/GeneratingIndicator.tsx';
 import { connect, type Connection } from '../socket.ts';
 import { initialState, reduceEvent } from '../state.ts';
 
@@ -32,6 +33,15 @@ export function Session() {
     return () => conn.close();
   }, []);
 
+  useEffect(() => {
+    if (state.status !== 'generating') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') connection.current?.send({ type: 'session.interrupt' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [state.status]);
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <TopBar controls={PLACEHOLDER_CONTROLS} />
@@ -46,6 +56,11 @@ export function Session() {
           }}
         >
           <Conversation messages={state.messages} />
+          {state.status === 'generating' && (
+            <GeneratingIndicator
+              onInterrupt={() => connection.current?.send({ type: 'session.interrupt' })}
+            />
+          )}
           <Composer
             disabled={state.status === 'disconnected'}
             onSend={(text) => connection.current?.send({ type: 'message.send', text })}
