@@ -1,5 +1,9 @@
 import { query as realQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type {
+  SDKMessage,
+  SDKPartialAssistantMessage,
+  SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk';
 import { createMessageQueue } from './queue.ts';
 import type { ServerEvent, SessionState } from '../protocol.ts';
 
@@ -107,24 +111,15 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     }
   }
 
-  function handleStreamEvent(event: { type: string } & Record<string, unknown>): void {
+  function handleStreamEvent(event: SDKPartialAssistantMessage['event']): void {
     if (event.type === 'message_start') {
-      const started = event.message;
-      if (typeof started === 'object' && started !== null && 'id' in started) {
-        const id = (started as { id: unknown }).id;
-        if (typeof id === 'string') streamingMessageId = id;
-      }
+      streamingMessageId = event.message.id;
       return;
     }
+    if (event.type !== 'content_block_delta' || event.delta.type !== 'text_delta') return;
+    if (streamingMessageId === null) return;
 
-    if (event.type !== 'content_block_delta' || streamingMessageId === null) return;
-
-    const delta = event.delta;
-    if (typeof delta !== 'object' || delta === null) return;
-    const candidate = delta as { type?: unknown; text?: unknown };
-    if (candidate.type !== 'text_delta' || typeof candidate.text !== 'string') return;
-
-    opts.emit({ type: 'message.delta', messageId: streamingMessageId, text: candidate.text });
+    opts.emit({ type: 'message.delta', messageId: streamingMessageId, text: event.delta.text });
   }
 
   function describeTarget(input: unknown): string | undefined {
