@@ -7,6 +7,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "outDir": "dist/server",
+    "rootDir": "server",
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "types": ["node"],
