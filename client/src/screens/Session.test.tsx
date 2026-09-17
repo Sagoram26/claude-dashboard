@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Session } from './Session.tsx';
 
 test('affiche les trois régions fixes', () => {
@@ -83,17 +83,19 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
 
   render(<Session />);
 
-  listeners[0]?.({
-    data: JSON.stringify({
-      type: 'session.state',
-      state: {
-        sessionId: 's1',
-        cwd: '/tmp',
-        status: 'generating',
-        model: 'claude-opus-5',
-        permissionMode: 'default',
-      },
-    }),
+  act(() => {
+    listeners[0]?.({
+      data: JSON.stringify({
+        type: 'session.state',
+        state: {
+          sessionId: 's1',
+          cwd: '/tmp',
+          status: 'generating',
+          model: 'claude-opus-5',
+          permissionMode: 'default',
+        },
+      }),
+    });
   });
 
   const button = screen.getByRole('button', { name: /interrompre/i });

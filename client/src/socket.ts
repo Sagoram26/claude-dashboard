@@ -1,4 +1,3 @@
-import { flushSync } from 'react-dom';
 import type { ClientCommand, ServerEvent } from '../../server/protocol.ts';
 
 export type Connection = {
@@ -11,12 +10,13 @@ export function connect(url: string, onEvent: (event: ServerEvent) => void): Con
 
   socket.onmessage = (message: { data: unknown }) => {
     if (typeof message.data !== 'string') return;
+    let event: ServerEvent;
     try {
-      const event = JSON.parse(message.data) as ServerEvent;
-      flushSync(() => onEvent(event));
+      event = JSON.parse(message.data) as ServerEvent;
     } catch {
-      // message serveur illisible : on ignore plutôt que de casser l'interface
+      return; // message serveur illisible : on ignore plutôt que de casser l'interface
     }
+    onEvent(event);
   };
 
   return {
