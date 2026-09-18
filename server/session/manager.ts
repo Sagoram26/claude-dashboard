@@ -6,7 +6,8 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { createMessageQueue } from './queue.ts';
-import type { ServerEvent, SessionState } from '../protocol.ts';
+import { createPermissionBridge, type PermissionDecision } from './permissions.ts';
+import type { ServerEvent, SessionState, PermissionRequest } from '../protocol.ts';
 
 export type QueryFn = typeof realQuery;
 
@@ -21,6 +22,13 @@ export type SessionManager = {
   interrupt(): Promise<void>;
   state(): SessionState;
   stop(): Promise<void>;
+  respondPermission(requestId: string, decision: PermissionDecision, reason?: string): void;
+  pendingPermissions(): PermissionRequest[];
+  /**
+   * L'objet `Query` du SDK. Exposé en bloc plutôt qu'en huit méthodes de délégation : la tranche 2
+   * en appelle quatre, la tranche 3 en appellera cinq de plus.
+   */
+  control(): ReturnType<QueryFn>;
 };
 
 export function createSessionManager(opts: SessionManagerOptions): SessionManager {
@@ -49,9 +57,21 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     opts.emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
   };
 
+  const permissions = createPermissionBridge({
+    emit: opts.emit,
+    onPendingChange: (count) => {
+      if (count > 0) setState({ status: 'awaiting-permission' });
+      else if (state.status === 'awaiting-permission') setState({ status: 'generating' });
+    },
+  });
+
   const session = queryFn({
     prompt: queue.stream,
-    options: { cwd: opts.cwd, includePartialMessages: true },
+    options: {
+      cwd: opts.cwd,
+      includePartialMessages: true,
+      canUseTool: permissions.canUseTool,
+    },
   });
 
   const pump = (async () => {
@@ -160,5 +180,13 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       queue.close();
       await pump;
     },
+
+    respondPermission: (requestId, decision, reason) => {
+      permissions.respond(requestId, decision, reason);
+    },
+
+    pendingPermissions: () => permissions.pending(),
+
+    control: () => session,
   };
 }

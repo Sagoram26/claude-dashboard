@@ -147,3 +147,16 @@ test('mcpServer traverse tel quel', async () => {
   bridge.respond('r1', 'allow');
   await decision;
 });
+
+test('onPendingChange suit le nombre de demandes en attente', async () => {
+  const counts: number[] = [];
+  const bridge = createPermissionBridge({ emit: () => {}, onPendingChange: (n) => counts.push(n) });
+
+  const first = bridge.canUseTool('Read', {}, options({ requestId: 'r1' }));
+  const second = bridge.canUseTool('Bash', {}, options({ requestId: 'r2' }));
+  bridge.respond('r1', 'allow');
+  bridge.respond('r2', 'allow');
+  await Promise.all([first, second]);
+
+  assert.deepEqual(counts, [1, 2, 1, 0]);
+});

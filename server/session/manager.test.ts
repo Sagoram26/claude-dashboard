@@ -11,13 +11,17 @@ function fakeQuery(scenario: (userTexts: string[]) => unknown[]) {
     seenOptions = options;
     const iterable = prompt as AsyncIterable<{ message: { content: unknown } }>;
 
-    return (async function* () {
+    const generator = (async function* () {
       for await (const userMessage of iterable) {
         const content = userMessage.message.content;
         userTexts.push(typeof content === 'string' ? content : JSON.stringify(content));
         for (const event of scenario(userTexts)) yield event;
       }
     })();
+
+    // Le double porte les méthodes de contrôle de l'objet `Query`, sinon `manager.control()` rend
+    // un générateur nu et tout appel de contrôle échoue à l'exécution sans qu'aucun test le voie.
+    return Object.assign(generator, { interrupt: async () => undefined });
   };
 
   return { query: query as never, userTexts, options: () => seenOptions };
@@ -359,17 +363,12 @@ test('aucun session_id n est poussé dans le message utilisateur', async () => {
 });
 
 test('le gestionnaire passe canUseTool au SDK et expose control', async () => {
-  let received: unknown = undefined;
-  const { query } = fakeQuery(() => []);
+  // `fakeQuery` capture déjà les options reçues : pas besoin d'un espion qui rappelle `query`.
+  const { query, options } = fakeQuery(() => []);
 
-  const spy = ((args: { options?: { canUseTool?: unknown } }) => {
-    received = args.options?.canUseTool;
-    return query(args as never);
-  }) as never;
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
 
-  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: spy });
-
-  assert.equal(typeof received, 'function', 'canUseTool doit etre passe a query()');
+  assert.equal(typeof options()?.canUseTool, 'function', 'canUseTool doit etre passe a query()');
   assert.equal(typeof manager.control().interrupt, 'function', 'control() rend l objet Query');
 
   await manager.stop();

@@ -65,7 +65,7 @@ export async function createServer(
   };
 }
 
-const isEntrypoint = process.argv[1]?.endsWith('index.ts');
+const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
 if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
 
@@ -73,7 +73,11 @@ if (isEntrypoint) {
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
     onConnect: (send) => {
-      if (manager) send({ type: 'session.state', state: manager.state() });
+      if (!manager) return;
+      send({ type: 'session.state', state: manager.state() });
+      for (const request of manager.pendingPermissions()) {
+        send({ type: 'permission.request', request });
+      }
     },
     onCommand: (cmd) => {
       if (!manager) return;
@@ -84,6 +88,9 @@ if (isEntrypoint) {
         manager.interrupt().catch((err: unknown) => {
           server.broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
         });
+      }
+      if (cmd.type === 'permission.respond') {
+        manager.respondPermission(cmd.requestId, cmd.decision, cmd.reason);
       }
     },
   });
