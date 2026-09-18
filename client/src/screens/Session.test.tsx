@@ -3,6 +3,26 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Session } from './Session.tsx';
 import { FakeWebSocket } from '../test-doubles.ts';
 
+// Tous les appels de listener passent par `emit`, y compris les appels déjà existants avant
+// cette feature : un listener invoqué hors `act` a coûté un `flushSync` de contournement en
+// tranche 1 (mineur #10). `.at(-1)` et non `[0]` : chaque test qui rend `<Session />` crée sa
+// propre instance de `FakeWebSocket`, et `instances` n'est jamais réinitialisé entre les tests
+// de ce fichier — `[0]` capterait le socket du tout premier test à en créer un.
+const emit = (event: unknown) => {
+  act(() => {
+    FakeWebSocket.instances.at(-1)?.onmessage?.({ data: JSON.stringify(event) });
+  });
+};
+
+const demande = {
+  requestId: 'r1',
+  toolUseId: 'tu1',
+  toolName: 'Bash',
+  input: { command: 'ls' },
+  canAlwaysAllow: true,
+  defaultToNo: false,
+};
+
 test('affiche les trois régions fixes', () => {
   render(<Session />);
   expect(screen.getByRole('banner')).toBeDefined();
@@ -28,14 +48,11 @@ test('un message reçu apparaît dans la conversation', async () => {
 
   render(<Session />);
 
-  const socket = FakeWebSocket.instances.at(-1);
-  socket?.onmessage?.({
-    data: JSON.stringify({
-      type: 'message.complete',
-      messageId: 'm1',
-      role: 'assistant',
-      text: 'bonjour',
-    }),
+  emit({
+    type: 'message.complete',
+    messageId: 'm1',
+    role: 'assistant',
+    text: 'bonjour',
   });
 
   expect(await screen.findByText('bonjour')).toBeDefined();
@@ -46,10 +63,7 @@ test('un appel d outil ne rend rien dans la conversation', () => {
 
   render(<Session />);
 
-  const socket = FakeWebSocket.instances.at(-1);
-  socket?.onmessage?.({
-    data: JSON.stringify({ type: 'tool.activity', toolUseId: 't1', name: 'Bash', target: 'ls' }),
-  });
+  emit({ type: 'tool.activity', toolUseId: 't1', name: 'Bash', target: 'ls' });
 
   expect(screen.getByRole('main').textContent).not.toContain('Bash');
   expect(screen.getByRole('main').textContent).not.toContain('ls');
@@ -61,19 +75,15 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
   render(<Session />);
 
   const socket = FakeWebSocket.instances.at(-1);
-  act(() => {
-    socket?.onmessage?.({
-      data: JSON.stringify({
-        type: 'session.state',
-        state: {
-          sessionId: 's1',
-          cwd: '/tmp',
-          status: 'generating',
-          model: 'claude-opus-5',
-          permissionMode: 'default',
-        },
-      }),
-    });
+  emit({
+    type: 'session.state',
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'generating',
+      model: 'claude-opus-5',
+      permissionMode: 'default',
+    },
   });
 
   const button = screen.getByRole('button', { name: /interrompre/i });
@@ -87,10 +97,7 @@ test('un événement error affiche un bandeau visible dans la conversation', asy
 
   render(<Session />);
 
-  const socket = FakeWebSocket.instances.at(-1);
-  socket?.onmessage?.({
-    data: JSON.stringify({ type: 'error', message: 'clé API absente' }),
-  });
+  emit({ type: 'error', message: 'clé API absente' });
 
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('clé API absente');
@@ -101,4 +108,54 @@ test('l indicateur est absent au repos', () => {
 
   render(<Session />);
   expect(screen.queryByRole('button', { name: /interrompre/i })).toBeNull();
+});
+
+test('le rappel apparait pendant l attente et disparait apres la decision', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+
+  expect(screen.queryByRole('status')).toBeNull();
+
+  emit({ type: 'permission.request', request: demande });
+  expect(screen.getByRole('status').textContent).toMatch(/Bash/);
+
+  emit({ type: 'permission.resolved', requestId: 'r1', decision: 'allow' });
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+test('autoriser depuis le rappel envoie la commande au serveur', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+  emit({ type: 'permission.request', request: demande });
+
+  fireEvent.click(screen.getByRole('button', { name: /autoriser/i }));
+
+  const socket = FakeWebSocket.instances.at(-1);
+  const sent = socket?.sent.map((s) => JSON.parse(s)) ?? [];
+  expect(sent).toContainEqual({ type: 'permission.respond', requestId: 'r1', decision: 'allow' });
+});
+
+test('la saisie reste utilisable pendant l attente', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+  emit({
+    type: 'session.state',
+    state: { sessionId: 's1', cwd: '/tmp', status: 'awaiting-permission', model: null, permissionMode: 'default' },
+  });
+  emit({ type: 'permission.request', request: demande });
+
+  const champ = screen.getByLabelText('Message') as HTMLTextAreaElement;
+  expect(champ.disabled).toBe(false);
+});
+
+test('le bloc du fil et le rappel repondent tous les deux', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+  emit({ type: 'permission.request', request: demande });
+
+  expect(screen.getAllByRole('button', { name: /autoriser/i }).length).toBeGreaterThanOrEqual(2);
 });
