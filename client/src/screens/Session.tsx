@@ -4,8 +4,9 @@ import { Footer, type FooterItem } from '../components/Footer.tsx';
 import { Conversation } from '../components/Conversation.tsx';
 import { Composer } from '../components/Composer.tsx';
 import { GeneratingIndicator } from '../components/GeneratingIndicator.tsx';
+import { PendingApprovalBar } from '../components/PendingApprovalBar.tsx';
 import { connect, type Connection } from '../socket.ts';
-import { initialState, reduceEvent } from '../state.ts';
+import { initialState, reduceEvent, type ApprovalEntry } from '../state.ts';
 
 const SOCKET_URL = `ws://${location.host}/ws`;
 
@@ -26,6 +27,9 @@ const PLACEHOLDER_FOOTER: FooterItem[] = [
 export function Session() {
   const [state, dispatch] = useReducer(reduceEvent, initialState);
   const connection = useRef<Connection | null>(null);
+  const pendingApprovals = state.thread.filter(
+    (e): e is ApprovalEntry => e.kind === 'approval' && e.decision === null
+  );
 
   useEffect(() => {
     const conn = connect(SOCKET_URL, dispatch);
@@ -67,6 +71,17 @@ export function Session() {
               onInterrupt={() => connection.current?.send({ type: 'session.interrupt' })}
             />
           )}
+          <PendingApprovalBar
+            pending={pendingApprovals}
+            onAllow={(requestId) =>
+              connection.current?.send({ type: 'permission.respond', requestId, decision: 'allow' })
+            }
+            onReveal={(requestId) =>
+              document
+                .querySelector(`[data-approval="${requestId}"]`)
+                ?.scrollIntoView({ block: 'center', behavior: 'auto' })
+            }
+          />
           <Composer
             disabled={state.status === 'disconnected'}
             onSend={(text) => connection.current?.send({ type: 'message.send', text })}

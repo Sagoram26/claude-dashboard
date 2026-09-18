@@ -114,3 +114,23 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .generating-dot { animation: none; }
 }
+
+.pill:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.pill:active:not(:disabled) {
+  background: var(--surface);
+}
+
+.pill:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pill:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

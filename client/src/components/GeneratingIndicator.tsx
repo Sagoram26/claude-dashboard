@@ -1,6 +1,7 @@
 export function GeneratingIndicator({ onInterrupt }: { onInterrupt: () => void }) {
   return (
     <div
+      role="status"
       style={{
         display: 'flex',
         alignItems: 'center',
