@@ -90,8 +90,6 @@ body {
   transition: border-color 120ms ease-out, background 120ms ease-out;
 }
 
-.pill:hover { border-color: var(--border-strong); }
-.pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pill[data-tone='warn'] { border-color: var(--warn); color: var(--warn); }
 .pill[data-tone='accent'] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .pill[data-dashed='true'] { border-style: dashed; }
