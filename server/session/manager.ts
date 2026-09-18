@@ -44,7 +44,9 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     cwd: opts.cwd,
     status: 'idle',
     model: null,
-    permissionMode: null,
+    // Doit rester d'accord avec `permissionMode` passé à `queryFn` plus bas. L'état ne doit
+    // jamais annoncer un mode que la session n'applique pas.
+    permissionMode: 'default',
   };
 
   // Identifiant du message assistant en cours de streaming. C'est l'id de message de l'API
@@ -69,9 +71,16 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     },
     isGranted: (toolName) => opts.store?.isGranted(toolName) ?? false,
     onGrant: (toolName) => {
-      void opts.store?.grant(toolName).then(() => {
-        opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
-      });
+      // `respond()` est synchrone, l'écriture disque ne l'est pas. Sans ce `.catch`, un dossier
+      // non inscriptible ou un disque plein produit un rejet non rattrapé, et Node fait tomber le
+      // processus entier : un clic sur « Toujours » suffirait à tuer le serveur.
+      // La permission n'est alors pas persistée — c'est le bon sens de l'échec : on redemandera.
+      void opts.store
+        ?.grant(toolName)
+        .then(() => {
+          opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
+        })
+        .catch(emitError);
     },
   });
 

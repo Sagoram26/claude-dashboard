@@ -25,8 +25,35 @@ export type PermissionBridge = {
 type Waiting = {
   request: PermissionRequest;
   suggestions: PermissionUpdate[];
+  accordeToutLOutil: boolean;
   settle: (result: PermissionResult) => void;
 };
+
+/**
+ * « Toujours pour cet outil » ne doit être proposé que si c'est bien ce qui va se passer.
+ *
+ * Deux conditions, et les deux comptent. `suppressAlwaysAllowRule` dit que le SDK refuse toute
+ * règle persistante pour cette demande. Mais son absence ne dit **pas** que la règle suggérée
+ * porte sur l'outil entier : `PermissionRuleValue.ruleContent` peut la restreindre à un motif
+ * précis, par exemple `Bash(npm test:*)`.
+ *
+ * Or notre stockage n'enregistre qu'un `toolName`. Si le SDK ne proposait qu'un motif étroit et
+ * qu'on enregistrait l'outil entier, la session suivante accorderait bien plus que ce que
+ * l'utilisateur a vu et validé. C'est une sur-autorisation silencieuse, et le pire genre : elle
+ * ne se manifeste qu'au redémarrage suivant, loin du clic qui l'a causée.
+ *
+ * Un tableau de suggestions vide signifie que le SDK ne propose rien de plus étroit : l'outil
+ * entier est alors la portée honnête.
+ */
+function accordeToutLOutil(toolName: string, suggestions: PermissionUpdate[]): boolean {
+  if (suggestions.length === 0) return true;
+  return suggestions.some(
+    (suggestion) =>
+      (suggestion.type === 'addRules' || suggestion.type === 'replaceRules') &&
+      suggestion.behavior === 'allow' &&
+      suggestion.rules.some((rule) => rule.toolName === toolName && rule.ruleContent === undefined)
+  );
+}
 
 export function createPermissionBridge(opts: {
   emit: (event: ServerEvent) => void;
@@ -51,6 +78,9 @@ export function createPermissionBridge(opts: {
     if (opts.isGranted?.(toolName)) return Promise.resolve({ behavior: 'allow' });
 
     return new Promise<PermissionResult>((resolve) => {
+      const suggestions = options.suggestions ?? [];
+      const toutLOutil = accordeToutLOutil(toolName, suggestions);
+
       const request: PermissionRequest = {
         requestId: options.requestId,
         toolUseId: options.toolUseID,
@@ -59,7 +89,7 @@ export function createPermissionBridge(opts: {
         displayName: options.displayName,
         description: options.description,
         input,
-        canAlwaysAllow: !options.suppressAlwaysAllowRule,
+        canAlwaysAllow: !options.suppressAlwaysAllowRule && toutLOutil,
         defaultToNo: options.defaultToNo === true,
         mcpServer: options.mcpServer,
       };
@@ -72,7 +102,8 @@ export function createPermissionBridge(opts: {
 
       waiting.set(options.requestId, {
         request,
-        suggestions: options.suggestions ?? [],
+        suggestions,
+        accordeToutLOutil: toutLOutil,
         settle,
       });
       notifyPendingChange();
@@ -109,7 +140,12 @@ export function createPermissionBridge(opts: {
       if (decision === 'deny') {
         entry.settle({ behavior: 'deny', message: reason ?? 'Refusé depuis le dashboard.' });
       } else if (decision === 'always') {
-        opts.onGrant?.(entry.request.toolName);
+        // Deuxième garde, volontairement redondante avec `canAlwaysAllow`. Celle-là masque le
+        // bouton dans l'interface ; celle-ci refuse d'enregistrer même si la commande arrive
+        // quand même. Une décision de portée ne se délègue pas au client.
+        // Les `updatedPermissions` partent dans tous les cas : le SDK, lui, sait appliquer une
+        // règle étroite, et elle vaut pour la session en cours.
+        if (entry.accordeToutLOutil) opts.onGrant?.(entry.request.toolName);
         entry.settle({ behavior: 'allow', updatedPermissions: entry.suggestions });
       } else {
         entry.settle({ behavior: 'allow' });

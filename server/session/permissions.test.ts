@@ -235,3 +235,100 @@ test('allow simple n enregistre rien', async () => {
 
   assert.deepEqual(accordes, []);
 });
+
+test('une suggestion restreinte n autorise pas le bouton toujours', async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({ emit: (e) => events.push(e) });
+
+  const decision = bridge.canUseTool('Bash', {}, options({
+    suggestions: [{
+      type: 'addRules',
+      rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }],
+      behavior: 'allow',
+      destination: 'session',
+    }],
+  }));
+
+  const emis = events.find((e) => e.type === 'permission.request');
+  assert.ok(emis && emis.type === 'permission.request');
+  assert.equal(
+    emis.request.canAlwaysAllow,
+    false,
+    'le SDK ne propose que Bash(npm test:*) ; enregistrer Bash entier accorderait plus que ce que l utilisateur a vu'
+  );
+
+  bridge.respond('r1', 'allow');
+  await decision;
+});
+
+test('une suggestion sur l outil entier autorise le bouton toujours', async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({ emit: (e) => events.push(e) });
+
+  const decision = bridge.canUseTool('Bash', {}, options({
+    suggestions: [{
+      type: 'addRules',
+      rules: [{ toolName: 'Bash' }],
+      behavior: 'allow',
+      destination: 'session',
+    }],
+  }));
+
+  const emis = events.find((e) => e.type === 'permission.request');
+  assert.ok(emis && emis.type === 'permission.request');
+  assert.equal(emis.request.canAlwaysAllow, true);
+
+  bridge.respond('r1', 'allow');
+  await decision;
+});
+
+test('always sur une portee restreinte n enregistre rien, meme si la commande arrive', async () => {
+  const accordes: string[] = [];
+  const bridge = createPermissionBridge({
+    emit: () => {},
+    onGrant: (toolName) => accordes.push(toolName),
+  });
+
+  const decision = bridge.canUseTool('Bash', {}, options({
+    suggestions: [{
+      type: 'addRules',
+      rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }],
+      behavior: 'allow',
+      destination: 'session',
+    }],
+  }));
+
+  // Le bouton est masque cote interface, mais un client malveillant ou bogue peut envoyer la
+  // commande quand meme. Une decision de portee ne se delegue pas au client.
+  bridge.respond('r1', 'always');
+  const resultat = await decision;
+
+  assert.deepEqual(accordes, [], 'aucune persistance sur une portee qu on ne sait pas reproduire');
+  assert.equal(resultat.behavior, 'allow');
+  assert.equal(
+    resultat.behavior === 'allow' ? resultat.updatedPermissions?.length : null,
+    1,
+    'la regle etroite part quand meme au SDK, qui sait l appliquer pour la session'
+  );
+});
+
+test('une suggestion deny ne vaut pas accord sur l outil entier', async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({ emit: (e) => events.push(e) });
+
+  const decision = bridge.canUseTool('Bash', {}, options({
+    suggestions: [{
+      type: 'addRules',
+      rules: [{ toolName: 'Bash' }],
+      behavior: 'deny',
+      destination: 'session',
+    }],
+  }));
+
+  const emis = events.find((e) => e.type === 'permission.request');
+  assert.ok(emis && emis.type === 'permission.request');
+  assert.equal(emis.request.canAlwaysAllow, false);
+
+  bridge.respond('r1', 'deny');
+  await decision;
+});
