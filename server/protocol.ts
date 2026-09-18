@@ -5,6 +5,7 @@ export type ServerEvent =
   | { type: 'tool.activity'; toolUseId: string; name: string; target?: string }
   | { type: 'permission.request'; request: PermissionRequest }
   | { type: 'permission.resolved'; requestId: string; decision: 'allow' | 'always' | 'deny' }
+  | { type: 'permission.granted'; granted: GrantedPermission[] }
   | { type: 'workflow.checkpoint'; checkpoint: WorkflowCheckpoint }
   | { type: 'files.changed'; files: ChangedFile[] }
   | { type: 'git.state'; git: GitState }
@@ -22,6 +23,7 @@ export type ClientCommand =
    * Ne pas le chercher dans `PermissionBehavior` ni dans `PermissionResult`.
    */
   | { type: 'permission.respond'; requestId: string; decision: 'allow' | 'always' | 'deny'; reason?: string }
+  | { type: 'permission.revoke'; toolName: string }
   | { type: 'workflow.start'; workflowId: string }
   | { type: 'workflow.resume'; checkpointId: string }
   | { type: 'context.compact' };
@@ -57,6 +59,12 @@ export type PermissionRequest = {
   mcpServer?: { name: string; source: string };
 };
 
+export type GrantedPermission = {
+  toolName: string;
+  /** ISO 8601. Sert à l'affichage dans les réglages, pas à une expiration : rien n'expire. */
+  grantedAt: string;
+};
+
 export type WorkflowCheckpoint = {
   id: string;
   label: string;
@@ -86,6 +94,7 @@ const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unkno
   'permission.respond': (v) =>
     typeof v.requestId === 'string' &&
     (v.decision === 'allow' || v.decision === 'always' || v.decision === 'deny'),
+  'permission.revoke': (v) => typeof v.toolName === 'string' && v.toolName.length > 0,
   'workflow.start': (v) => typeof v.workflowId === 'string',
   'workflow.resume': (v) => typeof v.checkpointId === 'string',
   'context.compact': () => true,

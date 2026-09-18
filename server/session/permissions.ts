@@ -31,6 +31,8 @@ type Waiting = {
 export function createPermissionBridge(opts: {
   emit: (event: ServerEvent) => void;
   onPendingChange?: (count: number) => void;
+  isGranted?: (toolName: string) => boolean;
+  onGrant?: (toolName: string) => void;
 }): PermissionBridge {
   const waiting = new Map<string, Waiting>();
 
@@ -44,8 +46,11 @@ export function createPermissionBridge(opts: {
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2]
-  ): Promise<PermissionResult> =>
-    new Promise<PermissionResult>((resolve) => {
+  ): Promise<PermissionResult> => {
+    // Court-circuit : la toute première chose faite, avant la moindre promesse suspendue.
+    if (opts.isGranted?.(toolName)) return Promise.resolve({ behavior: 'allow' });
+
+    return new Promise<PermissionResult>((resolve) => {
       const request: PermissionRequest = {
         requestId: options.requestId,
         toolUseId: options.toolUseID,
@@ -81,6 +86,7 @@ export function createPermissionBridge(opts: {
 
       opts.emit({ type: 'permission.request', request });
     });
+  };
 
   return {
     canUseTool,
@@ -103,6 +109,7 @@ export function createPermissionBridge(opts: {
       if (decision === 'deny') {
         entry.settle({ behavior: 'deny', message: reason ?? 'Refusé depuis le dashboard.' });
       } else if (decision === 'always') {
+        opts.onGrant?.(entry.request.toolName);
         entry.settle({ behavior: 'allow', updatedPermissions: entry.suggestions });
       } else {
         entry.settle({ behavior: 'allow' });

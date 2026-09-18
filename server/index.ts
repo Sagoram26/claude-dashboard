@@ -68,6 +68,7 @@ export async function createServer(
 const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
 if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
+  const { createPermissionStore } = await import('./session/permission-store.ts');
 
   let manager: ReturnType<typeof createSessionManager> | null = null;
 
@@ -78,6 +79,7 @@ if (isEntrypoint) {
       for (const request of manager.pendingPermissions()) {
         send({ type: 'permission.request', request });
       }
+      send({ type: 'permission.granted', granted: manager.grantedPermissions() });
     },
     onCommand: (cmd) => {
       if (!manager) return;
@@ -92,12 +94,20 @@ if (isEntrypoint) {
       if (cmd.type === 'permission.respond') {
         manager.respondPermission(cmd.requestId, cmd.decision, cmd.reason);
       }
+      if (cmd.type === 'permission.revoke') {
+        manager.revokePermission(cmd.toolName).catch((err: unknown) => {
+          server.broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+        });
+      }
     },
   });
+
+  const store = await createPermissionStore(process.cwd());
 
   manager = createSessionManager({
     cwd: process.cwd(),
     emit: (event) => server.broadcast(event),
+    store,
   });
 
   console.log(`server listening on http://127.0.0.1:${server.port}`);

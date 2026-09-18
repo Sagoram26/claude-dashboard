@@ -7,7 +7,8 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { createMessageQueue } from './queue.ts';
 import { createPermissionBridge, type PermissionDecision } from './permissions.ts';
-import type { ServerEvent, SessionState, PermissionRequest } from '../protocol.ts';
+import type { PermissionStore } from './permission-store.ts';
+import type { ServerEvent, SessionState, PermissionRequest, GrantedPermission } from '../protocol.ts';
 
 export type QueryFn = typeof realQuery;
 
@@ -15,6 +16,7 @@ export type SessionManagerOptions = {
   cwd: string;
   emit: (event: ServerEvent) => void;
   queryFn?: QueryFn;
+  store?: PermissionStore;
 };
 
 export type SessionManager = {
@@ -24,6 +26,8 @@ export type SessionManager = {
   stop(): Promise<void>;
   respondPermission(requestId: string, decision: PermissionDecision, reason?: string): void;
   pendingPermissions(): PermissionRequest[];
+  grantedPermissions(): GrantedPermission[];
+  revokePermission(toolName: string): Promise<void>;
   /**
    * L'objet `Query` du SDK. Exposé en bloc plutôt qu'en huit méthodes de délégation : la tranche 2
    * en appelle quatre, la tranche 3 en appellera cinq de plus.
@@ -63,6 +67,12 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       if (count > 0) setState({ status: 'awaiting-permission' });
       else if (state.status === 'awaiting-permission') setState({ status: 'generating' });
     },
+    isGranted: (toolName) => opts.store?.isGranted(toolName) ?? false,
+    onGrant: (toolName) => {
+      void opts.store?.grant(toolName).then(() => {
+        opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
+      });
+    },
   });
 
   const session = queryFn({
@@ -71,6 +81,11 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       cwd: opts.cwd,
       includePartialMessages: true,
       canUseTool: permissions.canUseTool,
+      // Mode déclaré explicitement, jamais hérité. La tranche 2 existe pour rendre le mode manuel
+      // utilisable depuis le navigateur : s'en remettre à une valeur par défaut du SDK qu'on n'a
+      // pas constatée, c'est exactement la classe d'hypothèse que la reconnaissance sert à tuer.
+      // La feature 06 le rendra changeable à chaud ; ici il est le point de départ.
+      permissionMode: 'default',
     },
   });
 
@@ -186,6 +201,13 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     },
 
     pendingPermissions: () => permissions.pending(),
+
+    grantedPermissions: () => opts.store?.list() ?? [],
+
+    async revokePermission(toolName) {
+      await opts.store?.revoke(toolName);
+      opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
+    },
 
     control: () => session,
   };

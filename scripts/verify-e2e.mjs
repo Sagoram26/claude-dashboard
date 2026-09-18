@@ -52,20 +52,27 @@ function runScenario(port) {
     const completeIds = new Set();
     const errors = [];
     const statuses = [];
+    const toolActivity = [];
+    const permissionRequests = [];
+    const permissionResolved = [];
     let userEcho = null;
     let interruptedText = null;
     let phase = 1;
     let totalUsd = 0;
 
     const send = (o) => ws.send(JSON.stringify(o));
+    const snapshot = () => ({
+      deltaIds, completeIds, errors, statuses, userEcho, interruptedText, totalUsd, toolActivity,
+      permissionRequests, permissionResolved,
+    });
     const done = () => {
       ws.close();
-      resolve({ deltaIds, completeIds, errors, statuses, userEcho, interruptedText, totalUsd });
+      resolve(snapshot());
     };
 
     ws.on('error', (err) => {
       errors.push(`connexion : ${err.message}`);
-      resolve({ deltaIds, completeIds, errors, statuses, userEcho, interruptedText, totalUsd });
+      resolve(snapshot());
     });
 
     ws.on('open', () => {
@@ -79,8 +86,18 @@ function runScenario(port) {
       if (e.type === 'message.delta') deltaIds.add(e.messageId);
       if (e.type === 'error') errors.push(e.message);
       if (e.type === 'session.state') statuses.push(e.state.status);
+      if (e.type === 'tool.activity') toolActivity.push(e.name);
       if (e.type === 'cost.usage') totalUsd = e.totalUsd;
       if (e.type === 'message.complete' && e.role === 'user') userEcho = e.text;
+
+      if (e.type === 'permission.request') {
+        permissionRequests.push(e.request);
+        // Autorisé immédiatement : ce qu'on vérifie est que la demande arrive intacte et que la
+        // réponse débloque l'agent, pas le délai de réflexion d'un humain.
+        send({ type: 'permission.respond', requestId: e.request.requestId, decision: 'allow' });
+      }
+      if (e.type === 'permission.resolved') permissionResolved.push(e.requestId);
+
       if (e.type !== 'message.complete' || e.role !== 'assistant') return;
 
       completeIds.add(e.messageId);
@@ -108,8 +125,22 @@ function runScenario(port) {
       if (phase === 3) {
         phase = 4;
         interruptedText = e.text;
-        console.log('[4/4] La session survit-elle à l interruption ?');
+        console.log('[4/5] La session survit-elle à l interruption ?');
         setTimeout(() => send({ type: 'message.send', text: 'Dis juste: toujours la' }), 500);
+        return;
+      }
+
+      if (phase === 4) {
+        phase = 5;
+        console.log('[5/5] Une demande de permission traverse-t-elle ?');
+        // Write et non Bash : le SDK classe `echo bonjour` comme sûr et n'appelle jamais
+        // `canUseTool` pour lui. Une écriture de fichier déclenche une vraie demande. Constaté en
+        // sondant le SDK, pas supposé — trois passages de vérification ont été dépensés à croire
+        // que le pont était cassé alors que c'était le scénario qui visait le mauvais outil.
+        setTimeout(
+          () => send({ type: 'message.send', text: 'Utilise l outil Write pour creer le fichier dist/verif-e2e.txt contenant le mot ok' }),
+          300,
+        );
         return;
       }
 
@@ -126,10 +157,33 @@ function runScenario(port) {
 console.log('⚠ Ce script appelle le vrai SDK et consomme des crédits.\n');
 console.log(`Démarrage du serveur sur le port ${PORT}…`);
 
+/**
+ * Environnement débarrassé du contexte Claude Code de l'appelant.
+ *
+ * Lancé depuis une session Claude Code, ce script hérite de `CLAUDECODE`,
+ * `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_MESSAGING_SOCKET` et consorts. Le SDK traite alors le
+ * serveur comme une session fille et fait arbitrer les permissions par la session parente : notre
+ * `canUseTool` n'est jamais appelé, et la vérification passe au vert en ayant testé le mauvais
+ * chemin.
+ *
+ * C'est exactement le contraire de ce qu'on cherche. L'utilisateur lancera `npm run dev:server`
+ * depuis un terminal ordinaire ; c'est cet environnement-là qu'il faut reproduire.
+ */
+function environnementPropre() {
+  const env = {};
+  for (const [cle, valeur] of Object.entries(process.env)) {
+    if (cle === 'CLAUDECODE' || cle === 'AI_AGENT') continue;
+    if (cle.startsWith('CLAUDE_CODE_') || cle.startsWith('CLAUDE_')) continue;
+    env[cle] = valeur;
+  }
+  env.PORT = String(PORT);
+  return env;
+}
+
 const server = spawn(
   process.execPath,
   ['--experimental-strip-types', 'server/index.ts'],
-  { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] },
+  { env: environnementPropre(), stdio: ['ignore', 'pipe', 'pipe'] },
 );
 
 const serverLog = [];
@@ -170,9 +224,31 @@ check(
 
 check('la session survit à l interruption', r.completeIds.size >= 4, `${r.completeIds.size} réponses au total`);
 
+check(
+  'une demande de permission atteint le client',
+  r.permissionRequests.length > 0,
+  `${r.permissionRequests.length} demande(s)`,
+);
+
+const champsComplets =
+  r.permissionRequests.length > 0 &&
+  r.permissionRequests.every((p) => p.requestId && p.toolUseId && p.toolName);
+check(
+  'la demande porte requestId, toolUseId et toolName',
+  champsComplets,
+  champsComplets ? 'les trois champs sont remplis' : 'un champ a change de nom en route',
+);
+
+check(
+  'la reponse debloque la demande',
+  r.permissionRequests.length > 0 && r.permissionResolved.length === r.permissionRequests.length,
+  `${r.permissionResolved.length} resolues sur ${r.permissionRequests.length}`,
+);
+
 check('aucune erreur', r.errors.length === 0, r.errors.join(' | ') || 'aucune');
 
 console.log(`\nStatuts traversés : ${[...new Set(r.statuses)].join(' → ')}`);
+console.log(`Outils appelés : ${[...new Set(r.toolActivity)].join(', ') || 'aucun'}`);
 console.log(`Coût de cette vérification : $${r.totalUsd.toFixed(4)}`);
 
 const echecs = results.filter((x) => !x.ok);

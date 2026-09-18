@@ -103,6 +103,7 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
 
     // Événements de protocole encore sans consommateur en tranche 1 (livrés en T2-T4). Listés
     // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
+    case 'permission.granted':
     case 'workflow.checkpoint':
     case 'files.changed':
     case 'git.state':
