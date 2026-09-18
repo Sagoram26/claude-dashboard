@@ -427,7 +427,7 @@ export function ControlMenu({
             minWidth: '100%',
             background: 'var(--surface-raised)',
             border: '1px solid var(--border-strong)',
-            borderRadius: 'var(--radius-panel)',
+            borderRadius: 'var(--radius-card)',
           }}
         >
           {options.map((option) => (

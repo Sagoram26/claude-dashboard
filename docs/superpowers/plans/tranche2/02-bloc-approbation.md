@@ -390,7 +390,7 @@ export function ApprovalBlock({
       data-approval={request.requestId}
       style={{
         border: '1px solid var(--border-strong)',
-        borderRadius: 'var(--radius-panel)',
+        borderRadius: 'var(--radius-card)',
         padding: 12,
         background: 'var(--surface-raised)',
         opacity: settled ? 0.7 : 1,
