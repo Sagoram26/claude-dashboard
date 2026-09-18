@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { Session } from './Session.tsx';
 import { FakeWebSocket } from '../test-doubles.ts';
 
@@ -130,7 +130,10 @@ test('autoriser depuis le rappel envoie la commande au serveur', () => {
   render(<Session />);
   emit({ type: 'permission.request', request: demande });
 
-  fireEvent.click(screen.getByRole('button', { name: /autoriser/i }));
+  // Le clic est porté sur le bouton DU RAPPEL, pas sur celui du bloc : sans ce cadrage, le test
+  // passerait déjà grâce au bloc de la feature 02 et ne vérifierait jamais le rappel.
+  const rappel = screen.getByRole('status');
+  fireEvent.click(within(rappel).getByRole('button', { name: /autoriser/i }));
 
   const socket = FakeWebSocket.instances.at(-1);
   const sent = socket?.sent.map((s) => JSON.parse(s)) ?? [];
@@ -147,6 +150,9 @@ test('la saisie reste utilisable pendant l attente', () => {
   });
   emit({ type: 'permission.request', request: demande });
 
+  // Les deux assertions comptent ensemble. Sans la première, le test serait vacuement vrai : le
+  // composeur n'est désactivé que sur `disconnected`, donc il passerait sans que le rappel existe.
+  expect(screen.getByRole('status')).toBeDefined();
   const champ = screen.getByLabelText('Message') as HTMLTextAreaElement;
   expect(champ.disabled).toBe(false);
 });
