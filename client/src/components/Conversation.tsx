@@ -1,6 +1,15 @@
-import type { ChatMessage } from '../state.ts';
+import type { ThreadEntry } from '../state.ts';
+import { ApprovalBlock } from './ApprovalBlock.tsx';
 
-export function Conversation({ messages, error }: { messages: ChatMessage[]; error: string | null }) {
+export function Conversation({
+  thread,
+  error,
+  onDecide,
+}: {
+  thread: ThreadEntry[];
+  error: string | null;
+  onDecide: (requestId: string, decision: 'allow' | 'always' | 'deny', reason?: string) => void;
+}) {
   return (
     <div
       style={{
@@ -27,20 +36,28 @@ export function Conversation({ messages, error }: { messages: ChatMessage[]; err
           {error}
         </div>
       )}
-      {messages.map((message) => (
-        <article
-          key={message.id}
-          data-role={message.role}
-          style={{
-            fontSize: 14,
-            lineHeight: 1.6,
-            color: message.role === 'user' ? 'var(--text-muted)' : 'var(--text)',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {message.text}
-        </article>
-      ))}
+      {thread.map((entry) =>
+        entry.kind === 'approval' ? (
+          <ApprovalBlock
+            key={entry.id}
+            entry={entry}
+            onDecide={(decision, reason) => onDecide(entry.id, decision, reason)}
+          />
+        ) : (
+          <article
+            key={entry.id}
+            data-role={entry.role}
+            style={{
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: entry.role === 'user' ? 'var(--text-muted)' : 'var(--text)',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {entry.text}
+          </article>
+        )
+      )}
     </div>
   );
 }

@@ -55,7 +55,13 @@ export function Session() {
             minHeight: 0,
           }}
         >
-          <Conversation messages={state.messages} error={state.error} />
+          <Conversation
+            thread={state.thread}
+            error={state.error}
+            onDecide={(requestId, decision, reason) =>
+              connection.current?.send({ type: 'permission.respond', requestId, decision, reason })
+            }
+          />
           {state.status === 'generating' && (
             <GeneratingIndicator
               onInterrupt={() => connection.current?.send({ type: 'session.interrupt' })}

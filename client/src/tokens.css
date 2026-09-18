@@ -14,8 +14,8 @@
   --ok: #5ec26a;
   --danger: #e06a6a;
 
-  --font-ui: Inter, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
 
   --topbar-h: 40px;
   --footer-h: 26px;
