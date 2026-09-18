@@ -89,6 +89,17 @@ export function createPermissionBridge(opts: {
       const entry = waiting.get(requestId);
       if (!entry) return;
 
+      // `permission.resolved` part AVANT `settle`, et l'ordre compte.
+      //
+      // `settle` vide la map, ce qui déclenche `onPendingChange(0)`, ce qui fait basculer le statut
+      // en `generating` et émet un `session.state`. Si cet événement partait le premier, le client
+      // afficherait l'indicateur de génération alors que le rappel d'approbation est encore là —
+      // deux éléments `role="status"` dans le DOM au même instant, et un rappel qui survit une
+      // image de trop à une décision déjà prise.
+      //
+      // En annonçant la décision d'abord, le rappel disparaît avant que l'indicateur n'apparaisse.
+      opts.emit({ type: 'permission.resolved', requestId, decision });
+
       if (decision === 'deny') {
         entry.settle({ behavior: 'deny', message: reason ?? 'Refusé depuis le dashboard.' });
       } else if (decision === 'always') {
@@ -96,8 +107,6 @@ export function createPermissionBridge(opts: {
       } else {
         entry.settle({ behavior: 'allow' });
       }
-
-      opts.emit({ type: 'permission.resolved', requestId, decision });
     },
 
     pending: () => [...waiting.values()].map((entry) => entry.request),

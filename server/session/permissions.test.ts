@@ -160,3 +160,23 @@ test('onPendingChange suit le nombre de demandes en attente', async () => {
 
   assert.deepEqual(counts, [1, 2, 1, 0]);
 });
+
+test('permission.resolved part avant le changement de statut', async () => {
+  const ordre: string[] = [];
+  const bridge = createPermissionBridge({
+    emit: (e) => ordre.push(e.type),
+    onPendingChange: (n) => ordre.push(`pending:${n}`),
+  });
+
+  const decision = bridge.canUseTool('Bash', {}, options());
+  bridge.respond('r1', 'allow');
+  await decision;
+
+  // L'ordre exact compte : si `pending:0` partait en premier, le client afficherait l'indicateur
+  // de generation alors que le rappel d'approbation est encore affiche — deux role="status"
+  // simultanes, et un rappel qui survit a une decision deja prise.
+  //
+  // A l'ouverture, le statut bascule AVANT la requete : l'indicateur de generation disparait,
+  // puis le rappel apparait. L'ordre inverse les ferait coexister.
+  assert.deepEqual(ordre, ['pending:1', 'permission.request', 'permission.resolved', 'pending:0']);
+});

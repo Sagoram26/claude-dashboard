@@ -290,7 +290,7 @@ Dans `client/src/tokens.css`, le design system promet quatre états par élémen
 textarea:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 ```
 
