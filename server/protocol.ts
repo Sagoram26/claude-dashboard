@@ -16,6 +16,11 @@ export type ClientCommand =
   | { type: 'message.send'; text: string }
   | { type: 'session.interrupt' }
   | { type: 'runtime.set'; model?: string; effort?: string; permissionMode?: string }
+  /**
+   * `'always'` n'existe dans aucune énumération du SDK : c'est un concept d'interface propre au
+   * dashboard, traduit côté serveur en `{behavior: 'allow', updatedPermissions: suggestions}`.
+   * Ne pas le chercher dans `PermissionBehavior` ni dans `PermissionResult`.
+   */
   | { type: 'permission.respond'; requestId: string; decision: 'allow' | 'always' | 'deny'; reason?: string }
   | { type: 'workflow.start'; workflowId: string }
   | { type: 'workflow.resume'; checkpointId: string }
@@ -31,13 +36,25 @@ export type SessionState = {
 
 export type PermissionRequest = {
   requestId: string;
+  /** Vient de `options.toolUseID` du SDK — casse différente, volontaire : tout le protocole est en camelCase. */
   toolUseId: string;
   toolName: string;
   title?: string;
   displayName?: string;
   description?: string;
   input: Record<string, unknown>;
+  /**
+   * Dérivé : `!options.suppressAlwaysAllowRule`. Le SDK expose l'inverse ; l'inversion est faite
+   * une fois ici plutôt que dans chaque composant qui lira le champ.
+   */
   canAlwaysAllow: boolean;
+  /**
+   * Vrai quand le SDK interdit qu'une frappe parasite approuve la demande : pas de raccourci
+   * d'approbation à une touche, et le focus va sur le refus.
+   */
+  defaultToNo: boolean;
+  /** Présent pour les outils `mcp__*`. `name` est du texte non fiable : ne jamais l'insérer en HTML brut. */
+  mcpServer?: { name: string; source: string };
 };
 
 export type WorkflowCheckpoint = {
