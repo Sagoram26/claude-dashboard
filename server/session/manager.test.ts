@@ -357,3 +357,28 @@ test('aucun session_id n est poussé dans le message utilisateur', async () => {
 
   await manager.stop();
 });
+
+test('le gestionnaire passe canUseTool au SDK et expose control', async () => {
+  let received: unknown = undefined;
+  const { query } = fakeQuery(() => []);
+
+  const spy = ((args: { options?: { canUseTool?: unknown } }) => {
+    received = args.options?.canUseTool;
+    return query(args as never);
+  }) as never;
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: spy });
+
+  assert.equal(typeof received, 'function', 'canUseTool doit etre passe a query()');
+  assert.equal(typeof manager.control().interrupt, 'function', 'control() rend l objet Query');
+
+  await manager.stop();
+});
+
+test('le gestionnaire expose les demandes en attente', async () => {
+  const { query } = fakeQuery(() => []);
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
+
+  assert.deepEqual(manager.pendingPermissions(), []);
+  await manager.stop();
+});
