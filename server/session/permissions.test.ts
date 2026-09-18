@@ -180,3 +180,58 @@ test('permission.resolved part avant le changement de statut', async () => {
   // puis le rappel apparait. L'ordre inverse les ferait coexister.
   assert.deepEqual(ordre, ['pending:1', 'permission.request', 'permission.resolved', 'pending:0']);
 });
+
+// `timeout` explicite : ce test attend une promesse que SEUL le court-circuit peut resoudre. Sans
+// lui, tant que la fonctionnalite n'existe pas, il ne echoue pas — il pend, et bloque toute la
+// suite. Un test rouge doit echouer vite. Le garde reste utile ensuite : si une regression casse
+// le court-circuit, la suite echoue en deux secondes au lieu de rester suspendue.
+test('un outil deja accorde ne declenche aucune demande', { timeout: 2000 }, async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({
+    emit: (e) => events.push(e),
+    isGranted: (toolName) => toolName === 'Read',
+  });
+
+  const result = await bridge.canUseTool('Read', {}, options());
+
+  assert.deepEqual(result, { behavior: 'allow' });
+  assert.equal(events.filter((e) => e.type === 'permission.request').length, 0);
+  assert.equal(bridge.pending().length, 0);
+});
+
+test('un outil non accorde demande quand meme', async () => {
+  const bridge = createPermissionBridge({ emit: () => {}, isGranted: () => false });
+  const decision = bridge.canUseTool('Bash', {}, options());
+  assert.equal(bridge.pending().length, 1);
+  bridge.respond('r1', 'allow');
+  await decision;
+});
+
+test('always enregistre l outil', async () => {
+  const accordes: string[] = [];
+  const bridge = createPermissionBridge({
+    emit: () => {},
+    isGranted: () => false,
+    onGrant: (toolName) => accordes.push(toolName),
+  });
+
+  const decision = bridge.canUseTool('Bash', {}, options());
+  bridge.respond('r1', 'always');
+  await decision;
+
+  assert.deepEqual(accordes, ['Bash']);
+});
+
+test('allow simple n enregistre rien', async () => {
+  const accordes: string[] = [];
+  const bridge = createPermissionBridge({
+    emit: () => {},
+    onGrant: (toolName) => accordes.push(toolName),
+  });
+
+  const decision = bridge.canUseTool('Bash', {}, options());
+  bridge.respond('r1', 'allow');
+  await decision;
+
+  assert.deepEqual(accordes, []);
+});
