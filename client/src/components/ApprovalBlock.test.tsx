@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from 'vitest';
+import { test, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ApprovalBlock } from './ApprovalBlock.tsx';
 import type { ApprovalEntry } from '../state.ts';

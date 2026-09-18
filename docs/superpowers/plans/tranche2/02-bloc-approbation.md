@@ -348,7 +348,7 @@ const DECISION_LABEL: Record<NonNullable<ApprovalEntry['decision']>, string> = {
 /** Le contenu exact soumis à approbation, selon l'outil. Jamais une reformulation. */
 function Body({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
   const mono = {
-    font: 'var(--font-mono)',
+    fontFamily: 'var(--font-mono)',
     fontSize: 12,
     whiteSpace: 'pre-wrap' as const,
     margin: 0,
@@ -389,10 +389,13 @@ export function ApprovalBlock({
     <section
       data-approval={request.requestId}
       style={{
-        border: '1px solid var(--border-strong)',
-        borderRadius: 'var(--radius-card)',
+        // docs/design-system.md : « Approval block — 1px `--warn` border, `--warn-soft` fill »,
+        // et « 5px on controls and blocks ». `--warn` veut dire « approbation en attente » : une
+        // demande tranchée n'attend plus, donc elle redevient neutre.
+        border: `1px solid ${settled ? 'var(--border)' : 'var(--warn)'}`,
+        borderRadius: 'var(--radius-control)',
         padding: 12,
-        background: 'var(--surface-raised)',
+        background: settled ? 'var(--surface-raised)' : 'var(--warn-soft)',
         opacity: settled ? 0.7 : 1,
       }}
     >
