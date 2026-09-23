@@ -42,5 +42,5 @@ test('echap ferme l ecran', () => {
 
 test('la date d octroi est affichee de maniere lisible', () => {
   render(<Settings granted={granted} onRevoke={() => {}} onClose={() => {}} />);
-  expect(screen.getByText(/2026/)).toBeTruthy();
+  expect(screen.getAllByText(/2026/).length).toBeGreaterThan(0);
 });

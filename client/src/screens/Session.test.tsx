@@ -165,3 +165,19 @@ test('le bloc du fil et le rappel repondent tous les deux', () => {
 
   expect(screen.getAllByRole('button', { name: /autoriser/i }).length).toBeGreaterThanOrEqual(2);
 });
+
+test('echap ne coupe pas la generation quand les reglages sont ouverts', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
+  render(<Session />);
+  emit({
+    type: 'session.state',
+    state: { sessionId: 's1', cwd: '/tmp', status: 'generating', model: null, permissionMode: null },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: /réglages/i }));
+  fireEvent.keyDown(window, { key: 'Escape' });
+
+  const sent = FakeWebSocket.instances.at(-1)?.sent.map((s) => JSON.parse(s)) ?? [];
+  expect(sent).not.toContainEqual({ type: 'session.interrupt' });
+});

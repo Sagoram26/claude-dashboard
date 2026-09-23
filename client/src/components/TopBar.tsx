@@ -4,7 +4,13 @@ export type ControlPill = {
   dashed?: boolean;
 };
 
-export function TopBar({ controls }: { controls: ControlPill[] }) {
+export function TopBar({
+  controls,
+  onOpenSettings,
+}: {
+  controls: ControlPill[];
+  onOpenSettings?: () => void;
+}) {
   return (
     <header
       role="banner"
@@ -30,7 +36,16 @@ export function TopBar({ controls }: { controls: ControlPill[] }) {
           <span style={{ opacity: 0.5 }}>▾</span>
         </button>
       ))}
-      <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontSize: 11 }}>⌘K</span>
+      <button
+        type="button"
+        className="pill"
+        aria-label="Réglages"
+        style={{ marginLeft: 'auto' }}
+        onClick={onOpenSettings}
+      >
+        ⚙
+      </button>
+      <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>⌘K</span>
     </header>
   );
 }
