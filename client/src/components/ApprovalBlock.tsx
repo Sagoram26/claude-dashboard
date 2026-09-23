@@ -32,11 +32,26 @@ function Body({ toolName, input }: { toolName: string; input: Record<string, unk
     );
   }
 
-  const single = ['command', 'file_path', 'path', 'pattern']
-    .map((key) => input[key])
-    .find((value) => typeof value === 'string');
+  // Un champ principal se met en avant pour la lisibilité, mais aucun autre champ ne disparaît :
+  // `dangerouslyDisableSandbox`, `run_in_background`, un `pattern` à côté d'un `path`… tout ce que
+  // le SDK a mis dans `input` fait partie du contenu exact soumis à approbation.
+  const primaryKey = ['command', 'file_path', 'path', 'pattern'].find(
+    (key) => typeof input[key] === 'string'
+  );
+  const primary = primaryKey ? (input[primaryKey] as string) : undefined;
+  const reste = Object.fromEntries(Object.entries(input).filter(([key]) => key !== primaryKey));
+  const resteNonVide = Object.keys(reste).length > 0;
 
-  return <pre style={mono}>{typeof single === 'string' ? single : JSON.stringify(input, null, 2)}</pre>;
+  return (
+    <div>
+      <pre style={mono}>{primary ?? JSON.stringify(input, null, 2)}</pre>
+      {primary !== undefined && resteNonVide && (
+        <pre style={{ ...mono, color: 'var(--text-muted)', marginTop: 6 }}>
+          {JSON.stringify(reste, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 export function ApprovalBlock({

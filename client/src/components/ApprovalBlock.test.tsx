@@ -33,6 +33,31 @@ test('le contenu exact soumis a approbation est affiche', () => {
   expect(screen.getByText('rm -rf build')).toBeTruthy();
 });
 
+test('les champs au-dela du champ principal restent visibles, jamais masques', () => {
+  render(
+    <ApprovalBlock
+      entry={entry({
+        input: { command: 'rm -rf build', dangerouslyDisableSandbox: true, timeout: 5000 },
+      })}
+      onDecide={() => {}}
+    />
+  );
+  expect(screen.getByText('rm -rf build')).toBeTruthy();
+  expect(screen.getByText(/dangerouslyDisableSandbox/)).toBeTruthy();
+  expect(screen.getByText(/timeout/)).toBeTruthy();
+});
+
+test('quand path et pattern coexistent, aucun des deux n est masque', () => {
+  render(
+    <ApprovalBlock
+      entry={entry({ toolName: 'Grep', input: { path: 'src', pattern: 'TODO' } })}
+      onDecide={() => {}}
+    />
+  );
+  expect(screen.getByText('src')).toBeTruthy();
+  expect(screen.getByText(/TODO/)).toBeTruthy();
+});
+
 test('un Edit montre son chemin et son diff', () => {
   render(
     <ApprovalBlock

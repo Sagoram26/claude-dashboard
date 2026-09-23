@@ -55,6 +55,45 @@ function accordeToutLOutil(toolName: string, suggestions: PermissionUpdate[]): b
   );
 }
 
+/**
+ * Le SDK pose ces trois champs quand une régle persistante ne doit PAS remplacer cette demande
+ * précise : `suppressAlwaysAllowRule` dit qu'une règle large dépasserait cette action (chemin
+ * hors du dossier de travail, écriture dans `.claude/`…), `matchedAskRule` dit qu'une règle
+ * `permissions.ask` posée par l'utilisateur force ce prompt — une intention humaine explicite,
+ * pas un défaut — et `defaultToNo` marque une demande sensible. Le court-circuit sur permission
+ * persistante ne doit jamais passer outre : sinon un clic « Toujours » sur un outil anodin
+ * ouvrirait, plus tard, l'écriture de `.claude/settings.json` ou d'un fichier hors du dossier de
+ * travail sans jamais reposer la question.
+ */
+function doitQuandMemeDemander(options: {
+  suppressAlwaysAllowRule?: boolean;
+  matchedAskRule?: unknown;
+  defaultToNo?: boolean;
+}): boolean {
+  return (
+    options.suppressAlwaysAllowRule === true ||
+    options.matchedAskRule != null ||
+    options.defaultToNo === true
+  );
+}
+
+/**
+ * « Toujours pour cet outil » ne promet que la session en cours : le dashboard tient déjà sa
+ * propre persistance (permission-store.ts). Renvoyer les suggestions du SDK telles quelles
+ * écrirait potentiellement dans `.claude/settings.json` (destination `userSettings` /
+ * `projectSettings` / `localSettings`) ou élargirait la session via `setMode` / `addDirectories`
+ * — des effets que le bouton ne montre jamais à l'utilisateur. On ne repasse que les règles
+ * d'autorisation, forcées sur `session`.
+ */
+function permissionsPourLaSession(suggestions: PermissionUpdate[]): PermissionUpdate[] {
+  return suggestions
+    .filter(
+      (s): s is Extract<PermissionUpdate, { type: 'addRules' | 'replaceRules' }> =>
+        (s.type === 'addRules' || s.type === 'replaceRules') && s.behavior === 'allow'
+    )
+    .map((s) => ({ ...s, destination: 'session' }));
+}
+
 export function createPermissionBridge(opts: {
   emit: (event: ServerEvent) => void;
   onPendingChange?: (count: number) => void;
@@ -75,7 +114,10 @@ export function createPermissionBridge(opts: {
     options: Parameters<CanUseTool>[2]
   ): Promise<PermissionResult> => {
     // Court-circuit : la toute première chose faite, avant la moindre promesse suspendue.
-    if (opts.isGranted?.(toolName)) return Promise.resolve({ behavior: 'allow' });
+    // Sauf si le SDK dit lui-même qu'une règle persistante ne couvre pas cette demande précise.
+    if (opts.isGranted?.(toolName) && !doitQuandMemeDemander(options)) {
+      return Promise.resolve({ behavior: 'allow' });
+    }
 
     return new Promise<PermissionResult>((resolve) => {
       const suggestions = options.suggestions ?? [];
@@ -108,10 +150,15 @@ export function createPermissionBridge(opts: {
       });
       notifyPendingChange();
 
-      // Un abandon côté SDK doit refuser, jamais laisser la promesse suspendue.
+      // Un abandon côté SDK doit refuser, jamais laisser la promesse suspendue — et le client doit
+      // en être informé : sans `permission.resolved`, le bloc d'approbation et le rappel ancré
+      // restent actionnables indéfiniment, alors que la demande qu'ils portent n'existe plus.
       options.signal.addEventListener(
         'abort',
-        () => settle({ behavior: 'deny', message: 'Demande abandonnée.' }),
+        () => {
+          opts.emit({ type: 'permission.resolved', requestId: options.requestId, decision: 'deny' });
+          settle({ behavior: 'deny', message: 'Demande abandonnée.' });
+        },
         { once: true }
       );
 
@@ -146,7 +193,7 @@ export function createPermissionBridge(opts: {
         // Les `updatedPermissions` partent dans tous les cas : le SDK, lui, sait appliquer une
         // règle étroite, et elle vaut pour la session en cours.
         if (entry.accordeToutLOutil) opts.onGrant?.(entry.request.toolName);
-        entry.settle({ behavior: 'allow', updatedPermissions: entry.suggestions });
+        entry.settle({ behavior: 'allow', updatedPermissions: permissionsPourLaSession(entry.suggestions) });
       } else {
         entry.settle({ behavior: 'allow' });
       }

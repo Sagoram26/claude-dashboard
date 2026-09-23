@@ -38,9 +38,14 @@ export async function createPermissionStore(cwd: string): Promise<PermissionStor
     granted = [];
   }
 
-  const ecrire = async () => {
+  // Le disque fait foi. `granted` ne change qu'APRES une écriture réussie : sinon un échec
+  // d'écriture laisse la mémoire promettre un état que le disque n'a jamais eu, et le prochain
+  // redémarrage (qui relit le disque) contredit silencieusement ce que l'utilisateur a vu
+  // pendant la session — un octroi qui disparaît, ou pire, une révocation qui n'a jamais eu lieu.
+  const ecrire = async (prochain: GrantedPermission[]) => {
     await mkdir(dirname(chemin), { recursive: true });
-    await writeFile(chemin, `${JSON.stringify({ granted }, null, 2)}\n`, 'utf8');
+    await writeFile(chemin, `${JSON.stringify({ granted: prochain }, null, 2)}\n`, 'utf8');
+    granted = prochain;
   };
 
   return {
@@ -50,15 +55,13 @@ export async function createPermissionStore(cwd: string): Promise<PermissionStor
 
     async grant(toolName) {
       if (granted.some((g) => g.toolName === toolName)) return;
-      granted = [...granted, { toolName, grantedAt: new Date().toISOString() }];
-      await ecrire();
+      await ecrire([...granted, { toolName, grantedAt: new Date().toISOString() }]);
     },
 
     async revoke(toolName) {
       const reste = granted.filter((g) => g.toolName !== toolName);
       if (reste.length === granted.length) return;
-      granted = reste;
-      await ecrire();
+      await ecrire(reste);
     },
   };
 }

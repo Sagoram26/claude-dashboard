@@ -68,6 +68,41 @@ test('un fichier corrompu ne fait pas tomber le serveur', async () => {
   assert.deepEqual(store.list(), [], 'un fichier illisible repart de zero plutot que de faire tomber');
 });
 
+test('un echec d ecriture sur grant ne met pas la memoire a jour', async () => {
+  const dir = await scratch();
+  const store = await createPermissionStore(dir);
+
+  // Un dossier a la place du fichier fait echouer `writeFile` (EISDIR) de facon fiable et
+  // multiplateforme, sans toucher aux permissions du systeme de fichiers.
+  await mkdir(join(dir, '.claude-dashboard', 'permissions.json'), { recursive: true });
+
+  await assert.rejects(() => store.grant('Bash'));
+  assert.deepEqual(
+    store.list(),
+    [],
+    "si l ecriture echoue, la memoire ne doit pas dire 'accorde' alors que le disque ne l a jamais ete : redemarrer redemanderait a tort la permission alors que l etat en memoire promettait qu elle etait la"
+  );
+  assert.equal(store.isGranted('Bash'), false);
+});
+
+test('un echec d ecriture sur revoke ne met pas la memoire a jour', async () => {
+  const dir = await scratch();
+  const store = await createPermissionStore(dir);
+  await store.grant('Bash');
+
+  // Remplace le fichier par un dossier apres l octroi reussi, pour faire echouer la revocation.
+  const { rm } = await import('node:fs/promises');
+  await rm(join(dir, '.claude-dashboard', 'permissions.json'));
+  await mkdir(join(dir, '.claude-dashboard', 'permissions.json'), { recursive: true });
+
+  await assert.rejects(() => store.revoke('Bash'));
+  assert.equal(
+    store.isGranted('Bash'),
+    true,
+    "si l ecriture de la revocation echoue, la permission doit rester accordee en memoire : sinon l ecran de reglages afficherait la revocation comme faite alors que le redemarrage suivant la retablirait silencieusement"
+  );
+});
+
 test('un fichier valide mais de forme inattendue repart de zero', async () => {
   const dir = await scratch();
   await mkdir(join(dir, '.claude-dashboard'), { recursive: true });

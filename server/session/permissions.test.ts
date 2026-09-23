@@ -69,21 +69,38 @@ test('un refus sans raison porte quand meme un message non vide', async () => {
   assert.ok(result.behavior === 'deny' && result.message.length > 0);
 });
 
-test('always renvoie les suggestions du SDK telles quelles', async () => {
+test('always renvoie une regle allow forcee sur la session, pas la destination suggeree par le SDK', async () => {
   const bridge = createPermissionBridge({ emit: () => {} });
   const suggestions = [
-    { type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'session' },
+    { type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' },
   ];
   const decision = bridge.canUseTool('Bash', {}, options({ suggestions }));
   bridge.respond('r1', 'always');
 
   const result = await decision;
   assert.equal(result.behavior, 'allow');
-  assert.equal(
+  assert.deepEqual(
     result.behavior === 'allow' ? result.updatedPermissions : null,
-    suggestions,
-    'le tableau doit etre repasse tel quel, pas reconstruit champ par champ'
+    [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'session' }],
+    "le dashboard tient deja sa propre persistance ; ecrire dans userSettings/localSettings/projectSettings au nom d un bouton qui ne promet que la session courante serait plus large que ce que l utilisateur a vu"
   );
+});
+
+test('always ne renvoie jamais un setMode ou un addDirectories qu un bouton "toujours pour cet outil" ne promet pas', async () => {
+  const bridge = createPermissionBridge({ emit: () => {} });
+  const suggestions = [
+    { type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'session' },
+    { type: 'setMode', mode: 'acceptEdits', destination: 'session' },
+    { type: 'addDirectories', directories: ['/etc'], destination: 'session' },
+  ];
+  const decision = bridge.canUseTool('Bash', {}, options({ suggestions }));
+  bridge.respond('r1', 'always');
+
+  const result = await decision;
+  assert.equal(result.behavior, 'allow');
+  const updated = result.behavior === 'allow' ? result.updatedPermissions : [];
+  assert.equal(updated?.length, 1, 'setMode et addDirectories elargiraient la session au-dela de ce que le bouton annonce');
+  assert.equal(updated?.[0]?.type, 'addRules');
 });
 
 test('la decision emet permission.resolved et vide l attente', async () => {
@@ -132,6 +149,21 @@ test('l abandon cote SDK refuse la demande au lieu de la laisser pendre', async 
   const result = await decision;
   assert.equal(result.behavior, 'deny', 'un abandon ne doit jamais rendre null ni rester suspendu');
   assert.equal(bridge.pending().length, 0);
+});
+
+test('l abandon cote SDK emet permission.resolved, sinon le rappel reste bloque cote client', async () => {
+  const controller = new AbortController();
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({ emit: (e) => events.push(e) });
+  const decision = bridge.canUseTool('Read', {}, options({ signal: controller.signal }));
+
+  controller.abort();
+  await decision;
+
+  const resolved = events.find((e) => e.type === 'permission.resolved');
+  assert.ok(resolved && resolved.type === 'permission.resolved', 'sans cet evenement, ApprovalBlock et PendingApprovalBar restent actionnables indefiniment');
+  assert.equal(resolved.requestId, 'r1');
+  assert.equal(resolved.decision, 'deny');
 });
 
 test('mcpServer traverse tel quel', async () => {
@@ -197,6 +229,60 @@ test('un outil deja accorde ne declenche aucune demande', { timeout: 2000 }, asy
   assert.deepEqual(result, { behavior: 'allow' });
   assert.equal(events.filter((e) => e.type === 'permission.request').length, 0);
   assert.equal(bridge.pending().length, 0);
+});
+
+test('un outil deja accorde redemande quand meme si suppressAlwaysAllowRule', { timeout: 2000 }, async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({
+    emit: (e) => events.push(e),
+    isGranted: (toolName) => toolName === 'Write',
+  });
+
+  const decision = bridge.canUseTool('Write', {}, options({ suppressAlwaysAllowRule: true }));
+  assert.equal(
+    events.filter((e) => e.type === 'permission.request').length,
+    1,
+    'le SDK dit qu une regle large depasserait cette action precise ; le court-circuit ne doit pas passer outre'
+  );
+
+  bridge.respond('r1', 'allow');
+  await decision;
+});
+
+test('un outil deja accorde redemande quand meme si matchedAskRule', { timeout: 2000 }, async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({
+    emit: (e) => events.push(e),
+    isGranted: (toolName) => toolName === 'Bash',
+  });
+
+  const decision = bridge.canUseTool(
+    'Bash',
+    {},
+    options({ matchedAskRule: { source: 'project', toolName: 'Bash', ruleContent: 'git push:*' } })
+  );
+  assert.equal(
+    events.filter((e) => e.type === 'permission.request').length,
+    1,
+    'une regle ask explicitement posee par l utilisateur exprime une intention humaine ; le court-circuit ne doit pas la court-circuiter'
+  );
+
+  bridge.respond('r1', 'allow');
+  await decision;
+});
+
+test('un outil deja accorde redemande quand meme si defaultToNo', { timeout: 2000 }, async () => {
+  const events: ServerEvent[] = [];
+  const bridge = createPermissionBridge({
+    emit: (e) => events.push(e),
+    isGranted: (toolName) => toolName === 'Read',
+  });
+
+  const decision = bridge.canUseTool('Read', {}, options({ defaultToNo: true }));
+  assert.equal(events.filter((e) => e.type === 'permission.request').length, 1);
+
+  bridge.respond('r1', 'allow');
+  await decision;
 });
 
 test('un outil non accorde demande quand meme', async () => {
