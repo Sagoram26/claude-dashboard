@@ -139,3 +139,29 @@ test('pendingApprovals ne compte que les demandes non tranchees', () => {
   state = reduceEvent(state, { type: 'permission.resolved', requestId: 'a', decision: 'always' });
   expect(state.thread.filter((e) => e.kind === 'approval' && e.decision === null)).toHaveLength(1);
 });
+
+test('permission.granted remplace la liste au lieu de l accumuler', () => {
+  let state = initialState;
+  state = reduceEvent(state, {
+    type: 'permission.granted',
+    granted: [{ toolName: 'Bash', grantedAt: '2026-09-18T10:00:00.000Z' }],
+  });
+  state = reduceEvent(state, {
+    type: 'permission.granted',
+    granted: [
+      { toolName: 'Bash', grantedAt: '2026-09-18T10:00:00.000Z' },
+      { toolName: 'Read', grantedAt: '2026-09-18T10:05:00.000Z' },
+    ],
+  });
+
+  expect(state.granted.map((g) => g.toolName)).toEqual(['Bash', 'Read']);
+});
+
+test('une revocation cote serveur vide la liste', () => {
+  let state = reduceEvent(initialState, {
+    type: 'permission.granted',
+    granted: [{ toolName: 'Bash', grantedAt: '2026-09-18T10:00:00.000Z' }],
+  });
+  state = reduceEvent(state, { type: 'permission.granted', granted: [] });
+  expect(state.granted).toEqual([]);
+});
