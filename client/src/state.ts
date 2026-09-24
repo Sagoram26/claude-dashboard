@@ -24,6 +24,10 @@ export type AppState = {
   toolActivityCount: number;
   error: string | null;
   granted: GrantedPermission[];
+  model: SessionState['model'];
+  effort: SessionState['effort'];
+  permissionMode: SessionState['permissionMode'];
+  availableModels: SessionState['availableModels'];
 };
 
 export const initialState: AppState = {
@@ -32,6 +36,10 @@ export const initialState: AppState = {
   toolActivityCount: 0,
   error: null,
   granted: [],
+  model: null,
+  effort: null,
+  permissionMode: null,
+  availableModels: [],
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -98,7 +106,14 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
       return { ...state, toolActivityCount: state.toolActivityCount + 1 };
 
     case 'session.state':
-      return { ...state, status: event.state.status };
+      return {
+        ...state,
+        status: event.state.status,
+        model: event.state.model,
+        effort: event.state.effort,
+        permissionMode: event.state.permissionMode,
+        availableModels: event.state.availableModels,
+      };
 
     case 'error':
       return { ...state, error: event.message };

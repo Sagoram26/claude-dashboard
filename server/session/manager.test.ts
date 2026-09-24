@@ -22,6 +22,9 @@ function fakeQuery(
         userTexts.push(typeof content === 'string' ? content : JSON.stringify(content));
         for (const event of scenario(userTexts)) output.push(event);
       }
+      // `manager.stop()` ferme la queue d'entrée puis attend que `pump` se termine ; `pump` ne se
+      // termine que quand CETTE queue de sortie se ferme. Sans ce relais, `stop()` n'en finit jamais.
+      output.close();
     })();
 
     // Le double porte les méthodes de contrôle de l'objet `Query`, sinon `manager.control()` rend

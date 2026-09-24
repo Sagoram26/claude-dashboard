@@ -33,6 +33,7 @@ export type SessionManager = {
    * en appelle quatre, la tranche 3 en appellera cinq de plus.
    */
   control(): ReturnType<QueryFn>;
+  applyRuntime(reglages: { model?: string; effort?: string; permissionMode?: string }): Promise<void>;
 };
 
 export function createSessionManager(opts: SessionManagerOptions): SessionManager {
@@ -112,6 +113,19 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
   function handleMessage(message: SDKMessage): void {
     if (message.type === 'system' && message.subtype === 'init') {
       setState({ sessionId: message.session_id, model: message.model ?? null });
+      // `try` + `.catch` : la liste des modèles est un agrément, jamais une raison de faire tomber
+      // l'initialisation de session — ni de faire tomber la boucle `pump` si `supportedModels` est
+      // absent (un double de test qui ne teste pas les contrôles n'a pas à le fournir).
+      try {
+        void session
+          .supportedModels()
+          .then((models) =>
+            setState({ availableModels: models.map((m) => ({ value: m.value, displayName: m.displayName })) })
+          )
+          .catch(emitError);
+      } catch (err) {
+        emitError(err);
+      }
       return;
     }
 
@@ -169,6 +183,12 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     opts.emit({ type: 'message.delta', messageId: streamingMessageId, text: event.delta.text });
   }
 
+  // Valeurs exactes du SDK (sdk.d.ts:2366 et 623). `bypassPermissions` est volontairement absent de
+  // la liste offerte par l'interface : il désarme tout ce que la tranche 2 construit, et un tel
+  // choix se prend au terminal, pas en deux clics.
+  const MODES_OFFERTS = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'] as const;
+  const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
   function describeTarget(input: unknown): string | undefined {
     if (typeof input !== 'object' || input === null) return undefined;
     const record = input as Record<string, unknown>;
@@ -221,5 +241,38 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     },
 
     control: () => session,
+
+    async applyRuntime(reglages: { model?: string; effort?: string; permissionMode?: string }) {
+      const patch: Partial<SessionState> = {};
+
+      try {
+        if (reglages.permissionMode !== undefined) {
+          if (!MODES_OFFERTS.includes(reglages.permissionMode as never)) {
+            throw new Error(`Mode de permission non offert : ${reglages.permissionMode}`);
+          }
+          await session.setPermissionMode(reglages.permissionMode as never);
+          patch.permissionMode = reglages.permissionMode;
+        }
+
+        if (reglages.model !== undefined) {
+          await session.setModel(reglages.model);
+          patch.model = reglages.model;
+        }
+
+        if (reglages.effort !== undefined) {
+          if (!EFFORTS.includes(reglages.effort as never)) {
+            throw new Error(`Niveau d'effort inconnu : ${reglages.effort}`);
+          }
+          await session.applyFlagSettings({ effortLevel: reglages.effort as never });
+          patch.effort = reglages.effort;
+        }
+      } catch (err) {
+        emitError(err);
+        // On ne pousse que ce qui a réussi avant l'échec : l'état ne doit jamais affirmer un
+        // réglage que le SDK a refusé.
+      }
+
+      if (Object.keys(patch).length > 0) setState(patch);
+    },
   };
 }

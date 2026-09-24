@@ -1,14 +1,10 @@
-export type ControlPill = {
-  label: string;
-  tone?: 'neutral' | 'warn' | 'accent';
-  dashed?: boolean;
-};
+import type { ReactNode } from 'react';
 
 export function TopBar({
-  controls,
+  children,
   onOpenSettings,
 }: {
-  controls: ControlPill[];
+  children?: ReactNode;
   onOpenSettings?: () => void;
 }) {
   return (
@@ -19,23 +15,13 @@ export function TopBar({
         flex: '0 0 auto',
         display: 'flex',
         alignItems: 'center',
-        gap: 7,
+        gap: 8,
         padding: '0 10px',
         background: 'var(--surface)',
         borderBottom: '1px solid var(--border)',
       }}
     >
-      {controls.map((control) => (
-        <button
-          key={control.label}
-          className="pill"
-          data-tone={control.tone ?? 'neutral'}
-          data-dashed={control.dashed ? 'true' : undefined}
-        >
-          {control.label}
-          <span style={{ opacity: 0.5 }}>▾</span>
-        </button>
-      ))}
+      {children}
       <button
         type="button"
         className="pill"

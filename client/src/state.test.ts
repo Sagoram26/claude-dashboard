@@ -165,3 +165,23 @@ test('une revocation cote serveur vide la liste', () => {
   state = reduceEvent(state, { type: 'permission.granted', granted: [] });
   expect(state.granted).toEqual([]);
 });
+
+test('un session.state met a jour modele effort mode et modeles disponibles', () => {
+  const state = reduceEvent(initialState, {
+    type: 'session.state',
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'idle',
+      model: 'claude-sonnet-5',
+      permissionMode: 'plan',
+      effort: 'high',
+      availableModels: [{ value: 'claude-sonnet-5', displayName: 'Sonnet 5' }],
+    },
+  });
+
+  expect(state.model).toBe('claude-sonnet-5');
+  expect(state.effort).toBe('high');
+  expect(state.permissionMode).toBe('plan');
+  expect(state.availableModels).toEqual([{ value: 'claude-sonnet-5', displayName: 'Sonnet 5' }]);
+});

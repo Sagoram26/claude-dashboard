@@ -31,7 +31,22 @@ test('affiche les trois régions fixes', () => {
 });
 
 test('la barre supérieure porte les contrôles runtime', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+
   render(<Session />);
+  emit({
+    type: 'session.state',
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'idle',
+      model: 'claude-opus-5',
+      permissionMode: 'default',
+      effort: 'high',
+      availableModels: [{ value: 'claude-opus-5', displayName: 'Opus 5' }],
+    },
+  });
+
   const banner = screen.getByRole('banner');
   expect(banner.textContent).toContain('Opus 5');
   expect(banner.textContent).toContain('high');
@@ -83,6 +98,8 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
       status: 'generating',
       model: 'claude-opus-5',
       permissionMode: 'default',
+      effort: null,
+      availableModels: [],
     },
   });
 
@@ -146,7 +163,15 @@ test('la saisie reste utilisable pendant l attente', () => {
   render(<Session />);
   emit({
     type: 'session.state',
-    state: { sessionId: 's1', cwd: '/tmp', status: 'awaiting-permission', model: null, permissionMode: 'default' },
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'awaiting-permission',
+      model: null,
+      permissionMode: 'default',
+      effort: null,
+      availableModels: [],
+    },
   });
   emit({ type: 'permission.request', request: demande });
 
@@ -172,7 +197,15 @@ test('echap ne coupe pas la generation quand les reglages sont ouverts', () => {
   render(<Session />);
   emit({
     type: 'session.state',
-    state: { sessionId: 's1', cwd: '/tmp', status: 'generating', model: null, permissionMode: null },
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'generating',
+      model: null,
+      permissionMode: null,
+      effort: null,
+      availableModels: [],
+    },
   });
 
   fireEvent.click(screen.getByRole('button', { name: /réglages/i }));

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { TopBar, type ControlPill } from '../components/TopBar.tsx';
+import { TopBar } from '../components/TopBar.tsx';
+import { ControlMenu } from '../components/ControlMenu.tsx';
 import { Footer, type FooterItem } from '../components/Footer.tsx';
 import { Conversation } from '../components/Conversation.tsx';
 import { Composer } from '../components/Composer.tsx';
@@ -11,12 +12,8 @@ import { initialState, reduceEvent, type ApprovalEntry } from '../state.ts';
 
 const SOCKET_URL = `ws://${location.host}/ws`;
 
-const PLACEHOLDER_CONTROLS: ControlPill[] = [
-  { label: 'Opus 5' },
-  { label: 'high' },
-  { label: 'acceptEdits' },
-  { label: 'TDD', dashed: true },
-];
+const MODES = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'];
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const PLACEHOLDER_FOOTER: FooterItem[] = [
   { text: 'main' },
@@ -48,9 +45,32 @@ export function Session() {
     return () => window.removeEventListener('keydown', onKey);
   }, [screen, state.status]);
 
+  const set = (reglage: 'model' | 'effort' | 'permissionMode') => (value: string) =>
+    connection.current?.send({ type: 'runtime.set', [reglage]: value });
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <TopBar controls={PLACEHOLDER_CONTROLS} onOpenSettings={() => setScreen('settings')} />
+      <TopBar onOpenSettings={() => setScreen('settings')}>
+        <ControlMenu
+          label="Modèle"
+          options={state.availableModels.map((m) => ({ value: m.value, label: m.displayName }))}
+          value={state.model}
+          onSelect={set('model')}
+        />
+        <ControlMenu
+          label="Effort"
+          options={EFFORTS.map((e) => ({ value: e, label: e }))}
+          value={state.effort}
+          onSelect={set('effort')}
+        />
+        <ControlMenu
+          label="Mode"
+          options={MODES.map((m) => ({ value: m, label: m }))}
+          value={state.permissionMode}
+          onSelect={set('permissionMode')}
+          tone={state.permissionMode === 'default' ? 'warn' : 'neutral'}
+        />
+      </TopBar>
       <main role="main" style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
         {screen === 'settings' ? (
           <Settings
