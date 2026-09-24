@@ -34,6 +34,9 @@ export type SessionState = {
   status: 'idle' | 'generating' | 'awaiting-permission' | 'disconnected';
   model: string | null;
   permissionMode: string | null;
+  effort: string | null;
+  /** Peuplé par `query.supportedModels()`. Vide tant que la session n'est pas établie. */
+  availableModels: { value: string; displayName: string }[];
 };
 
 export type PermissionRequest = {

@@ -47,6 +47,8 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     // Doit rester d'accord avec `permissionMode` passé à `queryFn` plus bas. L'état ne doit
     // jamais annoncer un mode que la session n'applique pas.
     permissionMode: 'default',
+    effort: null,
+    availableModels: [],
   };
 
   // Identifiant du message assistant en cours de streaming. C'est l'id de message de l'API

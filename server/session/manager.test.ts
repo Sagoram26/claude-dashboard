@@ -1,30 +1,57 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSessionManager } from './manager.ts';
+import { createMessageQueue } from './queue.ts';
 import type { ServerEvent } from '../protocol.ts';
 
-function fakeQuery(scenario: (userTexts: string[]) => unknown[]) {
+function fakeQuery(
+  scenario: (userTexts: string[]) => unknown[],
+  controlMethods: Record<string, unknown> = {}
+) {
   const userTexts: string[] = [];
   let seenOptions: Record<string, unknown> | undefined;
+  const output = createMessageQueue<unknown>();
 
   const query = ({ prompt, options }: { prompt: unknown; options?: Record<string, unknown> }) => {
     seenOptions = options;
     const iterable = prompt as AsyncIterable<{ message: { content: unknown } }>;
 
-    const generator = (async function* () {
+    void (async () => {
       for await (const userMessage of iterable) {
         const content = userMessage.message.content;
         userTexts.push(typeof content === 'string' ? content : JSON.stringify(content));
-        for (const event of scenario(userTexts)) yield event;
+        for (const event of scenario(userTexts)) output.push(event);
       }
     })();
 
     // Le double porte les méthodes de contrôle de l'objet `Query`, sinon `manager.control()` rend
     // un générateur nu et tout appel de contrôle échoue à l'exécution sans qu'aucun test le voie.
-    return Object.assign(generator, { interrupt: async () => undefined });
+    return Object.assign(output.stream, { interrupt: async () => undefined, ...controlMethods });
   };
 
-  return { query: query as never, userTexts, options: () => seenOptions };
+  return {
+    query: query as never,
+    userTexts,
+    options: () => seenOptions,
+    push: (m: unknown) => output.push(m),
+  };
+}
+
+function fakeControl() {
+  const calls: [string, unknown][] = [];
+  return {
+    calls,
+    methods: {
+      setModel: async (m?: string) => { calls.push(['setModel', m]); },
+      setPermissionMode: async (m: string) => { calls.push(['setPermissionMode', m]); },
+      applyFlagSettings: async (s: unknown) => { calls.push(['applyFlagSettings', s]); },
+      supportedModels: async () => [
+        { value: 'claude-opus-5', displayName: 'Opus 5', description: '' },
+        { value: 'claude-sonnet-5', displayName: 'Sonnet 5', description: '' },
+      ],
+      interrupt: async () => undefined,
+    },
+  };
 }
 
 test('un message envoyé atteint le SDK et sa réponse est diffusée', async () => {
@@ -379,5 +406,125 @@ test('le gestionnaire expose les demandes en attente', async () => {
   const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
 
   assert.deepEqual(manager.pendingPermissions(), []);
+  await manager.stop();
+});
+
+test('changer de modele appelle setModel et met a jour l etat', async () => {
+  const control = fakeControl();
+  const states: string[] = [];
+  const { query } = fakeQuery(() => [], control.methods);
+
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => { if (e.type === 'session.state' && e.state.model) states.push(e.state.model); },
+    queryFn: query,
+  });
+
+  await manager.applyRuntime({ model: 'claude-sonnet-5' });
+
+  assert.deepEqual(control.calls, [['setModel', 'claude-sonnet-5']]);
+  assert.equal(manager.state().model, 'claude-sonnet-5');
+  await manager.stop();
+});
+
+test('l effort passe par applyFlagSettings, pas par setModel', async () => {
+  const control = fakeControl();
+  const { query } = fakeQuery(() => [], control.methods);
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
+
+  await manager.applyRuntime({ effort: 'high' });
+
+  assert.deepEqual(control.calls, [['applyFlagSettings', { effortLevel: 'high' }]]);
+  assert.equal(manager.state().effort, 'high');
+  await manager.stop();
+});
+
+test('les trois reglages en un appel font trois appels SDK', async () => {
+  const control = fakeControl();
+  const { query } = fakeQuery(() => [], control.methods);
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
+
+  await manager.applyRuntime({ model: 'claude-opus-5', effort: 'low', permissionMode: 'plan' });
+
+  assert.deepEqual(control.calls.map(([name]) => name).sort(), [
+    'applyFlagSettings',
+    'setModel',
+    'setPermissionMode',
+  ]);
+  await manager.stop();
+});
+
+test('un reglage absent n appelle rien', async () => {
+  const control = fakeControl();
+  const { query } = fakeQuery(() => [], control.methods);
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
+
+  await manager.applyRuntime({});
+
+  assert.deepEqual(control.calls, []);
+  await manager.stop();
+});
+
+test('une valeur de mode inconnue est rejetee sans appeler le SDK', async () => {
+  const control = fakeControl();
+  const errors: string[] = [];
+  const { query } = fakeQuery(() => [], control.methods);
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => { if (e.type === 'error') errors.push(e.message); },
+    queryFn: query,
+  });
+
+  await manager.applyRuntime({ permissionMode: 'rm-rf' });
+
+  assert.deepEqual(control.calls, []);
+  assert.equal(errors.length, 1);
+  await manager.stop();
+});
+
+test('bypassPermissions est refuse en v1', async () => {
+  const control = fakeControl();
+  const { query } = fakeQuery(() => [], control.methods);
+  const manager = createSessionManager({ cwd: '/tmp', emit: () => {}, queryFn: query });
+
+  await manager.applyRuntime({ permissionMode: 'bypassPermissions' });
+
+  assert.deepEqual(control.calls, [], 'le mode qui desarme la tranche entiere ne passe pas par l interface');
+  await manager.stop();
+});
+
+test('un echec du SDK emet une erreur sans faire tomber la session', async () => {
+  const errors: string[] = [];
+  const { query } = fakeQuery(() => [], {
+    ...fakeControl().methods,
+    setModel: async () => { throw new Error('pas en mode flux'); },
+  });
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => { if (e.type === 'error') errors.push(e.message); },
+    queryFn: query,
+  });
+
+  await assert.doesNotReject(() => manager.applyRuntime({ model: 'x' }));
+  assert.deepEqual(errors, ['pas en mode flux']);
+  assert.notEqual(manager.state().model, 'x', 'l etat ne doit pas mentir sur un appel qui a echoue');
+  await manager.stop();
+});
+
+test('les modeles disponibles sont pousses a l initialisation', async () => {
+  const control = fakeControl();
+  const { query, push } = fakeQuery(() => [], control.methods);
+  const etats: unknown[] = [];
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => { if (e.type === 'session.state') etats.push(e.state.availableModels); },
+    queryFn: query,
+  });
+
+  push({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-opus-5', uuid: 'i1' });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const dernier = etats.at(-1) as { value: string }[];
+  assert.deepEqual(dernier.map((m) => m.value), ['claude-opus-5', 'claude-sonnet-5']);
   await manager.stop();
 });
