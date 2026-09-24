@@ -85,12 +85,20 @@ Une suite verte prouve la cohérence de chaque morceau avec lui-même. Elle ne p
 ## Critère de fin
 
 1. Passer la session en mode `default`, demander une action qui exige une approbation.
+   **Vérifié par `npm run verify:e2e`** (mode par défaut du serveur, demande `Write` déclenchée sur un vrai SDK) — passe.
 2. Le bloc apparaît dans le fil avec le contenu exact ; le rappel apparaît au-dessus du composeur.
+   **Partiellement vérifié.** `verify:e2e` confirme que `permission.request` atteint le client avec `requestId`/`toolUseId`/`toolName` intacts, et la couture (feature 07) confirme la traversée jusqu'à `reduceEvent`. Le rendu visuel exact du bloc et du rappel dans un vrai navigateur **n'est pas vérifié** — aucun agent n'a de navigateur ici.
 3. Autoriser : l'action s'exécute, le rappel disparaît, la trace reste dans le fil avec la décision.
+   **Vérifié par `verify:e2e`** (la demande est débloquée, résolue) et par la couture (le bloc reste dans le fil avec `decision: 'allow'`). La disparition du rappel dans l'UI réelle n'est pas observée visuellement.
 4. Refuser avec une raison : l'agent la reçoit et s'adapte.
+   **Vérifié par la couture** (`server/couture.test.ts`, test « un refus traverse aussi, avec sa raison ») : la raison traverse jusqu'au `PermissionResult` rendu au SDK.
 5. « Toujours pour cet outil » : la demande suivante pour ce même outil ne bloque plus.
+   **Vérifié par tests unitaires** (`server/session/permissions.test.ts`, feature 04) et par la couture (« always renvoie au SDK les suggestions qu'il avait fournies »). Non rejoué par `verify:e2e` ni observé en navigateur.
 6. Révoquer depuis les réglages : le blocage revient.
+   **Vérifié par tests unitaires** (feature 05, écran Réglages + révocation). Non observé en navigateur.
 7. Changer de modèle en cours de session, envoyer un message, vérifier que le coût évolue au tarif du nouveau modèle.
+   **Partiellement vérifié.** Feature 06 : `applyRuntime` appelle bien `setModel`/`setPermissionMode`/`applyFlagSettings` et met à jour l'état (tests unitaires serveur + client). Le tarif réel appliqué par le SDK après changement de modèle n'est pas vérifié ici — nécessite une session réelle en navigateur pour l'observer sur `cost.usage`.
 8. Une demande laissée sans réponse ne fait jamais tomber la session : elle attend.
+   **Vérifié par `verify:e2e`** (statuts traversés `idle → generating → awaiting-permission`, aucune erreur, session toujours répondante après) et par tests unitaires (`permissions.test.ts`).
 
-Les points 1 à 6 s'ajoutent à `scripts/verify-e2e.mjs` au fur et à mesure de la tranche, pour que le critère de fin reste exécutable et non déclaratif.
+Les points 1 à 4 et 8 sont couverts par `scripts/verify-e2e.mjs` (dix critères automatisés contre le vrai SDK, tous verts). Les points 5, 6 et 7 restent couverts par tests unitaires/couture uniquement : ils exigent une interface visible pour être observés de bout en bout, ce qu'aucun agent ne peut faire ici.
