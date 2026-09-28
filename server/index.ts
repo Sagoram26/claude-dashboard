@@ -88,7 +88,13 @@ if (isEntrypoint) {
   let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
-    listSessions: () => listRecentSessions(join(homedir(), '.claude', 'projects')),
+    listSessions: async () => {
+      const sessions = await listRecentSessions(join(homedir(), '.claude', 'projects'));
+      const currentId = manager?.state().sessionId;
+      // Seule la session que ce serveur a réellement en mémoire peut restituer son contexte
+      // (manager.history()) : les autres sont réelles mais lues à froid depuis un transcript.
+      return sessions.map((s) => ({ ...s, resumable: currentId !== null && s.sessionId === currentId }));
+    },
     onConnect: (send) => {
       if (!manager) return;
       send({ type: 'session.state', state: manager.state() });

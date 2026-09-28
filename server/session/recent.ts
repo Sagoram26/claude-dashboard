@@ -11,6 +11,12 @@ export type RecentSession = {
    * ou tout autre hote SDK) d une session lancee au terminal (`entrypoint: 'cli'`). Heuristique, pas
    * une garantie contractuelle — le format des transcripts ne l est pas non plus. */
   fromDashboard: boolean;
+  /**
+   * Toujours `false` ici : ce module ne connaît pas le gestionnaire de session actif. C'est
+   * `server/index.ts` qui recalcule ce champ à `true` pour la session que le serveur en cours
+   * a réellement en mémoire — la seule dont la reprise restitue vraiment le contexte (feature 06).
+   */
+  resumable: boolean;
 };
 
 /**
@@ -88,5 +94,6 @@ async function readSessionMetadata(path: string): Promise<RecentSession | null> 
     branch,
     lastActivity,
     fromDashboard,
+    resumable: false,
   };
 }

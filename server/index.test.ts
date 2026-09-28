@@ -14,7 +14,7 @@ test('le serveur répond sur /health', async () => {
 });
 
 test('/sessions rend la liste fournie par listSessions', async () => {
-  const sessions = [{ cwd: '/repo', sessionId: 's1', title: 't', branch: 'main', lastActivity: '2026-01-01T00:00:00.000Z', fromDashboard: true }];
+  const sessions = [{ cwd: '/repo', sessionId: 's1', title: 't', branch: 'main', lastActivity: '2026-01-01T00:00:00.000Z', fromDashboard: true, resumable: true }];
   const server = await createServer(0, { listSessions: async () => sessions });
   try {
     const res = await fetch(`http://127.0.0.1:${server.port}/sessions`);
