@@ -8,7 +8,7 @@ import type {
 import { createMessageQueue } from './queue.ts';
 import { createPermissionBridge, type PermissionDecision } from './permissions.ts';
 import type { PermissionStore } from './permission-store.ts';
-import type { ServerEvent, SessionState, PermissionRequest, GrantedPermission } from '../protocol.ts';
+import type { ServerEvent, SessionState, PermissionRequest, GrantedPermission, ContextUsage } from '../protocol.ts';
 
 export type QueryFn = typeof realQuery;
 
@@ -169,7 +169,29 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       if ('total_cost_usd' in message) {
         opts.emit({ type: 'cost.usage', totalUsd: message.total_cost_usd });
       }
+      // 'summary' répond depuis la dernière réponse et des estimations locales, sans les appels de
+      // comptage de tokens par catégorie que 'full' déclenche — c'est le mode de rafraîchissement
+      // de jauge, 'full' est réservé à l'ouverture du popover (feature 05).
+      // `try`/`catch` en plus du `.catch` : un double de test sans `getContextUsage` ne doit pas
+      // faire tomber toute la boucle `pump` (même garde que `supportedModels` plus haut).
+      try {
+        void session
+          .getContextUsage({ detail: 'summary' })
+          .then((usage) => opts.emit({ type: 'context.usage', usage: toContextUsage(usage) }))
+          .catch(emitError);
+      } catch (err) {
+        emitError(err);
+      }
     }
+  }
+
+  function toContextUsage(usage: Awaited<ReturnType<typeof session.getContextUsage>>): ContextUsage {
+    return {
+      totalTokens: usage.totalTokens,
+      maxTokens: usage.maxTokens,
+      percentage: usage.percentage,
+      categories: usage.categories.map((c) => ({ name: c.name, tokens: c.tokens })),
+    };
   }
 
   function handleStreamEvent(event: SDKPartialAssistantMessage['event']): void {

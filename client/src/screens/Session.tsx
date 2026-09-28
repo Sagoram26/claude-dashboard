@@ -22,6 +22,8 @@ const PLACEHOLDER_FOOTER: FooterItem[] = [
   { text: 'connecté', tone: 'ok', align: 'right' },
 ];
 
+const CONTEXT_ALERT_THRESHOLD = 80;
+
 export function Session() {
   const [state, dispatch] = useReducer(reduceEvent, initialState);
   const connection = useRef<Connection | null>(null);
@@ -118,7 +120,24 @@ export function Session() {
           </div>
         )}
       </main>
-      <Footer items={PLACEHOLDER_FOOTER} />
+      <Footer
+        items={[
+          ...PLACEHOLDER_FOOTER.slice(0, 3),
+          ...(state.contextUsage
+            ? [
+                {
+                  text: `${state.contextUsage.percentage}%`,
+                  tone:
+                    state.contextUsage.percentage >= CONTEXT_ALERT_THRESHOLD
+                      ? ('warn' as const)
+                      : ('neutral' as const),
+                  align: 'right' as const,
+                },
+              ]
+            : []),
+          ...PLACEHOLDER_FOOTER.slice(3),
+        ]}
+      />
     </div>
   );
 }

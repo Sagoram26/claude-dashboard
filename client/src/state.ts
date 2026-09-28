@@ -1,4 +1,10 @@
-import type { GrantedPermission, PermissionRequest, ServerEvent, SessionState } from '../../server/protocol.ts';
+import type {
+  ContextUsage,
+  GrantedPermission,
+  PermissionRequest,
+  ServerEvent,
+  SessionState,
+} from '../../server/protocol.ts';
 
 export type ChatMessage = {
   kind: 'message';
@@ -28,6 +34,7 @@ export type AppState = {
   effort: SessionState['effort'];
   permissionMode: SessionState['permissionMode'];
   availableModels: SessionState['availableModels'];
+  contextUsage: ContextUsage | null;
 };
 
 export const initialState: AppState = {
@@ -40,6 +47,7 @@ export const initialState: AppState = {
   effort: null,
   permissionMode: null,
   availableModels: [],
+  contextUsage: null,
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -121,12 +129,14 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
     case 'permission.granted':
       return { ...state, granted: event.granted };
 
-    // Événements de protocole encore sans consommateur en tranche 1 (livrés en T2-T4). Listés
+    case 'context.usage':
+      return { ...state, contextUsage: event.usage };
+
+    // Événements de protocole encore sans consommateur (livrés au fil de la tranche 3). Listés
     // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
     case 'workflow.checkpoint':
     case 'files.changed':
     case 'git.state':
-    case 'context.usage':
     case 'cost.usage':
       return state;
 
