@@ -69,8 +69,10 @@ const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
 if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
   const { createPermissionStore } = await import('./session/permission-store.ts');
+  const { createGitWatcher } = await import('./session/git-watcher.ts');
 
   let manager: ReturnType<typeof createSessionManager> | null = null;
+  let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
     onConnect: (send) => {
@@ -80,6 +82,11 @@ if (isEntrypoint) {
         send({ type: 'permission.request', request });
       }
       send({ type: 'permission.granted', granted: manager.grantedPermissions() });
+      if (gitWatcher) {
+        const snapshot = gitWatcher.state();
+        send({ type: 'git.state', git: snapshot.git });
+        send({ type: 'files.changed', files: snapshot.files });
+      }
     },
     onCommand: (cmd) => {
       if (!manager) return;
@@ -117,6 +124,11 @@ if (isEntrypoint) {
     cwd: process.cwd(),
     emit: (event) => server.broadcast(event),
     store,
+  });
+
+  gitWatcher = createGitWatcher({
+    cwd: process.cwd(),
+    emit: (event) => server.broadcast(event),
   });
 
   console.log(`server listening on http://127.0.0.1:${server.port}`);
