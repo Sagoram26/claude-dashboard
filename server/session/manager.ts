@@ -34,6 +34,14 @@ export type SessionManager = {
    */
   control(): ReturnType<QueryFn>;
   applyRuntime(reglages: { model?: string; effort?: string; permissionMode?: string }): Promise<void>;
+  /**
+   * Aucune méthode `Query` dédiée à la compaction (revue exhaustive de `sdk.d.ts` en feature 05) :
+   * `/compact` est un slash command, le seul chemin exposé est de l'envoyer comme texte utilisateur.
+   * Ne passe pas par `send()` : pas de bulle « utilisateur » pour une action d'interface.
+   */
+  compact(): void;
+  /** `detail: 'full'`, réservé à l'ouverture du popover de contexte. */
+  requestContextDetail(): void;
 };
 
 export function createSessionManager(opts: SessionManagerOptions): SessionManager {
@@ -209,19 +217,29 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       if ('total_cost_usd' in message) {
         opts.emit({ type: 'cost.usage', totalUsd: message.total_cost_usd });
       }
-      // 'summary' répond depuis la dernière réponse et des estimations locales, sans les appels de
-      // comptage de tokens par catégorie que 'full' déclenche — c'est le mode de rafraîchissement
-      // de jauge, 'full' est réservé à l'ouverture du popover (feature 05).
-      // `try`/`catch` en plus du `.catch` : un double de test sans `getContextUsage` ne doit pas
-      // faire tomber toute la boucle `pump` (même garde que `supportedModels` plus haut).
-      try {
-        void session
-          .getContextUsage({ detail: 'summary' })
-          .then((usage) => opts.emit({ type: 'context.usage', usage: toContextUsage(usage) }))
-          .catch(emitError);
-      } catch (err) {
-        emitError(err);
-      }
+      refreshContextUsage('summary');
+      return;
+    }
+
+    // Émis après une compaction, manuelle (notre '/compact') ou automatique (seuil atteint) : la
+    // fenêtre vient de changer, la jauge doit redescendre sans attendre le prochain tour complet
+    // (critère de fin de tranche 3, point 2).
+    if (message.type === 'system' && message.subtype === 'compact_boundary') {
+      refreshContextUsage('summary');
+      return;
+    }
+  }
+
+  // `try`/`catch` en plus du `.catch` : un double de test sans `getContextUsage` ne doit pas faire
+  // tomber toute la boucle `pump` (même garde que `supportedModels` plus haut).
+  function refreshContextUsage(detail: 'summary' | 'full'): void {
+    try {
+      void session
+        .getContextUsage({ detail })
+        .then((usage) => opts.emit({ type: 'context.usage', usage: toContextUsage(usage) }))
+        .catch(emitError);
+    } catch (err) {
+      emitError(err);
     }
   }
 
@@ -303,6 +321,18 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     },
 
     control: () => session,
+
+    compact() {
+      queue.push({
+        type: 'user',
+        message: { role: 'user', content: '/compact' },
+        parent_tool_use_id: null,
+      });
+    },
+
+    requestContextDetail() {
+      refreshContextUsage('full');
+    },
 
     async applyRuntime(reglages: { model?: string; effort?: string; permissionMode?: string }) {
       const patch: Partial<SessionState> = {};

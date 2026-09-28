@@ -7,6 +7,7 @@ import { Composer } from '../components/Composer.tsx';
 import { GeneratingIndicator } from '../components/GeneratingIndicator.tsx';
 import { PendingApprovalBar } from '../components/PendingApprovalBar.tsx';
 import { Sidebar, type SidebarColumn } from '../components/Sidebar.tsx';
+import { ContextPopover } from '../components/ContextPopover.tsx';
 import { Settings } from './Settings.tsx';
 import { connect, type Connection } from '../socket.ts';
 import { initialState, reduceEvent, type ApprovalEntry } from '../state.ts';
@@ -28,6 +29,7 @@ export function Session() {
   const connection = useRef<Connection | null>(null);
   const [screen, setScreen] = useState<'session' | 'settings'>('session');
   const [sidebarColumn, setSidebarColumn] = useState<SidebarColumn>('accueil');
+  const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
   const pendingApprovals = state.thread.filter(
     (e): e is ApprovalEntry => e.kind === 'approval' && e.decision === null
   );
@@ -51,7 +53,7 @@ export function Session() {
     connection.current?.send({ type: 'runtime.set', [reglage]: value });
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <TopBar onOpenSettings={() => setScreen('settings')}>
         <ControlMenu
           label="Modèle"
@@ -151,7 +153,10 @@ export function Session() {
                       ? ('warn' as const)
                       : ('neutral' as const),
                   align: 'right' as const,
-                  onClick: () => setSidebarColumn('accueil'),
+                  onClick: () => {
+                    setContextPopoverOpen(true);
+                    connection.current?.send({ type: 'context.request-full' });
+                  },
                 },
               ]
             : []),
@@ -161,6 +166,12 @@ export function Session() {
             align: 'right',
           },
         ]}
+      />
+      <ContextPopover
+        open={contextPopoverOpen}
+        usage={state.contextUsage}
+        onCompact={() => connection.current?.send({ type: 'context.compact' })}
+        onClose={() => setContextPopoverOpen(false)}
       />
     </div>
   );

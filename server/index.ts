@@ -106,6 +106,12 @@ if (isEntrypoint) {
           server.broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
         });
       }
+      if (cmd.type === 'context.compact') {
+        manager.compact();
+      }
+      if (cmd.type === 'context.request-full') {
+        manager.requestContextDetail();
+      }
       if (cmd.type === 'runtime.set') {
         // applyRuntime ne rejette jamais — elle capture et émet une erreur ; `void` est donc sûr,
         // contrairement à `void manager.interrupt()` qui avait fait tomber le serveur en tranche 1.
