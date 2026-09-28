@@ -217,3 +217,23 @@ test('cost.usage retient le dernier total, sans les additionner', () => {
 
   expect(state.costUsd).toBe(0.34);
 });
+
+test('git.state remplace la branche et les compteurs precedents', () => {
+  let state = reduceEvent(initialState, {
+    type: 'git.state',
+    git: { branch: 'main', dirty: 1, staged: 0 },
+  });
+  state = reduceEvent(state, {
+    type: 'git.state',
+    git: { branch: 'tranche-3', dirty: 2, staged: 1 },
+  });
+
+  expect(state.git).toEqual({ branch: 'tranche-3', dirty: 2, staged: 1 });
+});
+
+test('files.changed remplace la liste des fichiers modifies', () => {
+  const files = [{ path: 'src/a.ts', added: 3, removed: 1 }];
+  const state = reduceEvent(initialState, { type: 'files.changed', files });
+
+  expect(state.changedFiles).toEqual(files);
+});

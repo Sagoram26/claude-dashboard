@@ -89,6 +89,16 @@ test('le cout cumule remplace le placeholder du pied de page', () => {
   expect(footer.textContent).not.toContain('$0.00');
 });
 
+test('le pied de page affiche la branche et les compteurs git reels', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({ type: 'git.state', git: { branch: 'tranche-3', dirty: 2, staged: 1 } });
+  const footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('tranche-3');
+  expect(footer.textContent).not.toContain('main');
+});
+
 test('un message reçu apparaît dans la conversation', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
