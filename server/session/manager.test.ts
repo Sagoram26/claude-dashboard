@@ -622,3 +622,89 @@ test('un echec de getContextUsage emet une erreur sans faire tomber la session',
   assert.ok(events.some((e) => e.type === 'error' && e.message === 'boom'));
   await manager.stop();
 });
+
+test('compact() envoie /compact au SDK sans creer de bulle utilisateur dans le fil', async () => {
+  const events: ServerEvent[] = [];
+  const { query, userTexts } = fakeQuery(() => []);
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+
+  manager.compact();
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(userTexts, ['/compact']);
+  assert.ok(!events.some((e) => e.type === 'message.complete' && e.role === 'user'));
+
+  await manager.stop();
+});
+
+test('une frontiere de compactage redeclenche getContextUsage en detail summary', async () => {
+  const events: ServerEvent[] = [];
+  const control = fakeControl();
+  let appels = 0;
+  const getContextUsage = async () => {
+    appels++;
+    return {
+      categories: [],
+      totalTokens: 100,
+      maxTokens: 1000,
+      rawMaxTokens: 1000,
+      percentage: 10,
+      gridRows: [],
+      model: 'claude-sonnet-5',
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: true,
+    };
+  };
+  const { query, push } = fakeQuery(() => [], { ...control.methods, getContextUsage });
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  push({
+    type: 'system',
+    subtype: 'compact_boundary',
+    session_id: 's1',
+    uuid: 'c1',
+    compact_metadata: { trigger: 'manual', pre_tokens: 900 },
+  });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(appels, 1);
+  assert.ok(events.some((e) => e.type === 'context.usage'));
+
+  await manager.stop();
+});
+
+test('requestContextDetail() appelle getContextUsage en detail full', async () => {
+  const events: ServerEvent[] = [];
+  const control = fakeControl();
+  let vuOpts: unknown;
+  const getContextUsage = async (opts: unknown) => {
+    vuOpts = opts;
+    return {
+      categories: [{ name: 'CLAUDE.md', tokens: 50, color: '#fff', kind: 'used' as const }],
+      totalTokens: 50,
+      maxTokens: 1000,
+      rawMaxTokens: 1000,
+      percentage: 5,
+      gridRows: [],
+      model: 'claude-sonnet-5',
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: true,
+    };
+  };
+  const { query } = fakeQuery(() => [], { ...control.methods, getContextUsage });
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  manager.requestContextDetail();
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(vuOpts, { detail: 'full' });
+  const usage = events.find((e) => e.type === 'context.usage');
+  assert.ok(usage && usage.type === 'context.usage');
+  assert.deepEqual(usage.usage.categories, [{ name: 'CLAUDE.md', tokens: 50 }]);
+
+  await manager.stop();
+});

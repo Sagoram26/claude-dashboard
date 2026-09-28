@@ -26,7 +26,9 @@ export type ClientCommand =
   | { type: 'permission.revoke'; toolName: string }
   | { type: 'workflow.start'; workflowId: string }
   | { type: 'workflow.resume'; checkpointId: string }
-  | { type: 'context.compact' };
+  | { type: 'context.compact' }
+  /** `detail: 'full'` : réservé à l'ouverture du popover de contexte, jamais au rafraîchissement de la jauge. */
+  | { type: 'context.request-full' };
 
 export type SessionState = {
   sessionId: string | null;
@@ -111,6 +113,7 @@ const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unkno
   'workflow.start': (v) => typeof v.workflowId === 'string',
   'workflow.resume': (v) => typeof v.checkpointId === 'string',
   'context.compact': () => true,
+  'context.request-full': () => true,
 };
 
 export function parseClientCommand(raw: string): ClientCommand | null {

@@ -177,6 +177,37 @@ test('cliquer le rappel des extensions bascule la barre laterale sur skills et m
   expect(screen.getByRole('button', { name: /skills et mcp/i }).getAttribute('aria-pressed')).toBe('true');
 });
 
+test('cliquer la jauge ouvre le popover et demande le detail complet', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({
+    type: 'context.usage',
+    usage: { totalTokens: 400, maxTokens: 1000, percentage: 40, categories: [{ name: 'Messages', tokens: 400 }] },
+  });
+
+  fireEvent.click(screen.getByText('40%'));
+
+  const socket = FakeWebSocket.instances.at(-1);
+  expect(socket?.sent).toContain(JSON.stringify({ type: 'context.request-full' }));
+  expect(screen.getByRole('dialog').textContent).toContain('Messages');
+});
+
+test('compacter depuis le popover envoie context.compact au serveur', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({
+    type: 'context.usage',
+    usage: { totalTokens: 400, maxTokens: 1000, percentage: 40, categories: [] },
+  });
+  fireEvent.click(screen.getByText('40%'));
+  fireEvent.click(screen.getByRole('button', { name: /compact/i }));
+
+  const socket = FakeWebSocket.instances.at(-1);
+  expect(socket?.sent).toContain(JSON.stringify({ type: 'context.compact' }));
+});
+
 test('un message reçu apparaît dans la conversation', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
