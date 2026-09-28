@@ -708,3 +708,72 @@ test('requestContextDetail() appelle getContextUsage en detail full', async () =
 
   await manager.stop();
 });
+
+test('historique : messages et activite d outil sont rejouables, pas les deltas', async () => {
+  const events: ServerEvent[] = [];
+  const { query, push } = fakeQuery(() => []);
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+
+  manager.send('salut');
+  push({
+    type: 'stream_event',
+    event: { type: 'message_start', message: { id: 'msg_1' } },
+    session_id: 's1',
+    uuid: 'e0',
+    parent_tool_use_id: null,
+  });
+  push({
+    type: 'stream_event',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'bon' } },
+    session_id: 's1',
+    uuid: 'e1',
+    parent_tool_use_id: null,
+  });
+  push({
+    type: 'assistant',
+    message: {
+      id: 'msg_1',
+      content: [
+        { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+        { type: 'text', text: 'bonjour' },
+      ],
+    },
+    uuid: 'm1',
+    session_id: 's1',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const history = manager.history();
+  assert.deepEqual(
+    history.map((e) => e.type),
+    ['message.complete', 'tool.activity', 'message.complete']
+  );
+  assert.ok(!history.some((e) => e.type === 'message.delta'));
+
+  await manager.stop();
+});
+
+test('historique : une demande de permission et sa resolution sont rejouables', async () => {
+  const events: ServerEvent[] = [];
+  const { query, options } = fakeQuery(() => []);
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  await new Promise((r) => setTimeout(r, 10));
+
+  const canUseTool = options()?.canUseTool as (
+    name: string,
+    input: Record<string, unknown>,
+    opts: Record<string, unknown>
+  ) => Promise<unknown>;
+  void canUseTool('Bash', { command: 'ls' }, { signal: new AbortController().signal, requestId: 'r1', toolUseID: 'tu1' });
+  await new Promise((r) => setTimeout(r, 10));
+  manager.respondPermission('r1', 'allow');
+  await new Promise((r) => setTimeout(r, 10));
+
+  const history = manager.history();
+  assert.deepEqual(
+    history.map((e) => e.type),
+    ['permission.request', 'permission.resolved']
+  );
+
+  await manager.stop();
+});
