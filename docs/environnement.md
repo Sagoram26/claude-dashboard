@@ -440,6 +440,180 @@ contraintes globales de la tranche 2. Ce type devra être révisé en feature
   précisément dans un fichier de 9368 lignes généré aurait dépassé le
   périmètre de cette reconnaissance. Seul le champ `effortLevel` est garanti
   par la contrainte mappée visible dans la signature elle-même.
+
+## Tranche 3
+
+Relevé le 2026-09-28, branche `tranche-3`. Même source unique, mêmes versions
+que ci-dessus (rien n'a changé dans `node_modules`).
+
+### Signatures — `Query`
+
+```ts
+// sdk.d.ts:2801
+supportedCommands(): Promise<SlashCommand[]>;
+// sdk.d.ts:2807
+supportedModels(): Promise<ModelInfo[]>;
+// sdk.d.ts:2813
+supportedAgents(): Promise<AgentInfo[]>;
+// sdk.d.ts:2819
+mcpServerStatus(): Promise<McpServerStatus[]>;
+// sdk.d.ts:2830-2832
+getContextUsage(opts?: {
+    detail?: 'summary' | 'full';
+}): Promise<SDKControlGetContextUsageResponse>;
+```
+
+`detail: 'full'` compte chaque catégorie via l'API de comptage de tokens ;
+`'summary'` répond depuis la dernière réponse et des estimations locales.
+Défaut : `'full'`. Confirme la contrainte globale de Tranche3.md (`'summary'`
+pour le rafraîchissement de jauge, `'full'` à l'ouverture du popover
+seulement).
+
+### Écart confirmé : `getContextUsage` ne rend PAS `SDKContextUsage`
+
+Tranche3.md (contrainte globale) affirme que `getContextUsage` rend
+`SDKContextUsage` avec les champs `total_tokens`, `raw_max_tokens`,
+`percentage`, `over_limit?`, `categories[]`, `mcp_tools[]`, `memory_files[]`,
+`agents[]`, `skills[]` (casse serpent, comme le message `result`).
+
+**Faux.** La signature réelle (`sdk.d.ts:2830-2832`) rend
+`Promise<SDKControlGetContextUsageResponse>`, un type distinct
+(`sdk.d.ts:3717-3800`), en casse **camel**, avec une forme différente :
+
+```ts
+export declare type SDKControlGetContextUsageResponse = {
+    categories: {
+        name: string;
+        tokens: number;
+        color: string;
+        isDeferred?: boolean;
+        kind: 'used' | 'free' | 'buffer' | 'deferred';
+    }[];
+    totalTokens: number;
+    maxTokens: number;
+    rawMaxTokens: number;
+    percentage: number;
+    gridRows: {
+        color: string;
+        isFilled: boolean;
+        categoryName: string;
+        tokens: number;
+        percentage: number;
+        squareFullness: number;
+    }[][];
+    model: string;
+    memoryFiles: { path: string; type: string; tokens: number; }[];
+    mcpTools: { name: string; serverName: string; tokens: number; isLoaded?: boolean; }[];
+    deferredBuiltinTools?: { name: string; tokens: number; isLoaded: boolean; }[];
+    systemTools?: { name: string; tokens: number; }[];
+    systemPromptSections?: { name: string; tokens: number; }[];
+    agents: { agentType: string; source: string; tokens: number; }[];
+    slashCommands?: { totalCommands: number; includedCommands: number; tokens: number; };
+    skills?: {
+        totalSkills: number;
+        includedSkills: number;
+        tokens: number;
+        skillFrontmatter: { name: string; source: string; tokens: number; }[];
+    };
+    autoCompactThreshold?: number;
+    isAutoCompactEnabled: boolean;
+    messageBreakdown?: {
+        toolCallTokens: number;
+        toolResultTokens: number;
+        attachmentTokens: number;
+        assistantMessageTokens: number;
+        userMessageTokens: number;
+        redirectedContextTokens: number;
+        unattributedTokens: number;
+    };
+};
+```
+
+`SDKContextUsage` (`sdk.d.ts:3547-3608`, casse serpent, champs
+`total_tokens`/`raw_max_tokens`/`mcp_tools`/`memory_files`) existe bien dans
+`sdk.d.ts`, mais c'est la structure **twin du rapport `/context`** transportée
+dans le message `result` (`sdk.d.ts:3437`, `context_usage?: SDKContextUsage`),
+**pas** la valeur de retour de `Query.getContextUsage()`. Ce sont deux
+représentations parallèles du même calcul, avec des noms de champs qui ne se
+correspondent pas terme à terme (`total_tokens` vs `totalTokens`,
+`raw_max_tokens` vs `rawMaxTokens`, pas de `over_limit` côté réponse de
+contrôle — la limite dépassée doit se déduire de `totalTokens > rawMaxTokens`).
+
+**Conséquence pour la feature 01** : la jauge doit lire
+`SDKControlGetContextUsageResponse` (retour de l'appel), pas `SDKContextUsage`.
+Le seuil d'alerte à 80% se calcule sur `percentage` (déjà fourni, prêt à
+l'emploi) ou `totalTokens / rawMaxTokens`. Pas de `over_limit?` direct : le
+comparer soi-même si le dépassement doit être signalé distinctement du
+pourcentage.
+
+**Conséquence pour la feature 05 (popover)** : la ventilation par origine se
+lit sur `categories[]`, `mcpTools[]`, `memoryFiles[]`, `agents[]`, `skills[]`
+de cette réponse — noms en camelCase, pas ceux du plan.
+
+### Signatures — types associés
+
+```ts
+// sdk.d.ts:109-122
+export declare type AgentInfo = {
+    name: string;
+    description: string;
+    model?: string;
+};
+
+// sdk.d.ts:1160-1205
+export declare type McpServerStatus = {
+    name: string;
+    status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled';
+    serverInfo?: { name: string; version: string; };
+    error?: string;
+    config?: McpServerStatusConfig;
+    scope?: string;
+    source?: string;
+    tools?: { name: string; description?: string; annotations?: { readOnly?: boolean; destructive?: boolean; openWorld?: boolean; }; }[];
+};
+
+// sdk.d.ts:1313-...
+export declare type ModelInfo = {
+    value: string;
+    resolvedModel?: string;
+    displayName: string;
+    description: string;
+    supportsEffort?: boolean;
+    supportedEffortLevels?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[];
+    supportsAdaptiveThinking?: boolean;
+    // ... (champs supplémentaires non extraits, non requis par la tranche 3)
+};
+
+// sdk.d.ts:8843-8860
+export declare type SlashCommand = {
+    name: string;
+    description: string;
+    argumentHint: string;
+    aliases?: string[];
+};
+```
+
+Un serveur MCP hors ligne apparaît avec `status: 'failed'` (ou `'needs-auth'`
+ou `'pending'`) et `error?: string` — la contrainte du critère de fin
+(« signalé comme tel, pas masqué ») a une source directe : ne rien filtrer
+sur `status`, afficher la ligne quel que soit son statut.
+
+### Ce que je n'ai pas pu vérifier
+
+- Je n'ai pas extrait les champs restants de `ModelInfo` au-delà de
+  `supportsAdaptiveThinking` (le type continue après la ligne lue) : non
+  requis par les features de tranche 3 (aucune ne construit un sélecteur de
+  modèle), donc non extrait pour rester dans le périmètre du step demandé.
+- Je n'ai pas vérifié si `git status`/`git diff` sont invoqués ailleurs dans
+  `server/` en tranche 1 ou 2 : aucun signe dans `server/session/manager.ts`
+  ni `server/protocol.ts` (123 et 278 lignes, tous deux lus intégralement à
+  la recherche du mot `git`, sans résultat). La feature 03 part donc de zéro
+  côté serveur.
+- Je n'ai pas vérifié le format réel des fichiers sous `~/.claude/projects`
+  sur cette machine : la contrainte globale de Tranche3.md le dit déjà
+  « opportuniste, non contractuel » et demande une lecture tolérante — je n'ai
+  pas de justification à en extraire un schéma figé ici, ce serait inventer
+  une garantie que la contrainte dit explicitement ne pas exister.
 - `mcpServer.source` est typé `string` (pas une union de littéraux) : la
   liste de valeurs possibles (`'sdk'`, `'plugin'`, `'user'`, `'project'`,
   `'local'`, `'dynamic'`, `'managed'`, …) vient d'un commentaire, pas du
