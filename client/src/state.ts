@@ -40,6 +40,10 @@ export type AppState = {
   costUsd: number;
   git: GitState | null;
   changedFiles: ChangedFile[];
+  availableCommands: SessionState['availableCommands'];
+  availableAgents: SessionState['availableAgents'];
+  mcpServers: SessionState['mcpServers'];
+  cwd: string;
 };
 
 export const initialState: AppState = {
@@ -56,6 +60,10 @@ export const initialState: AppState = {
   costUsd: 0,
   git: null,
   changedFiles: [],
+  availableCommands: [],
+  availableAgents: [],
+  mcpServers: [],
+  cwd: '',
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -129,6 +137,10 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
         effort: event.state.effort,
         permissionMode: event.state.permissionMode,
         availableModels: event.state.availableModels,
+        availableCommands: event.state.availableCommands,
+        availableAgents: event.state.availableAgents,
+        mcpServers: event.state.mcpServers,
+        cwd: event.state.cwd,
       };
 
     case 'error':

@@ -99,6 +99,81 @@ test('le pied de page affiche la branche et les compteurs git reels', () => {
   expect(footer.textContent).not.toContain('main');
 });
 
+test('la barre laterale est presente et le nom de projet vient du cwd de la session', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  expect(screen.getByRole('complementary')).toBeDefined();
+
+  emit({
+    type: 'session.state',
+    state: {
+      sessionId: 's1',
+      cwd: '/home/utilisateur/mon-projet',
+      status: 'idle',
+      model: null,
+      permissionMode: 'default',
+      effort: null,
+      availableModels: [],
+      availableCommands: [{ name: 'commit', description: '' }],
+      availableAgents: [],
+      mcpServers: [{ name: 'linear', status: 'connected', toolCount: 2 }],
+    },
+  });
+
+  const footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('mon-projet');
+  expect(footer.textContent).toContain('1 skills · 1 MCP');
+});
+
+test('le statut de connexion au pied de page reflete l etat reel', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({
+    type: 'session.state',
+    state: {
+      sessionId: null,
+      cwd: '/tmp',
+      status: 'disconnected',
+      model: null,
+      permissionMode: null,
+      effort: null,
+      availableModels: [],
+      availableCommands: [],
+      availableAgents: [],
+      mcpServers: [],
+    },
+  });
+
+  const footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('déconnecté');
+});
+
+test('cliquer le rappel des extensions bascule la barre laterale sur skills et mcp', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({
+    type: 'session.state',
+    state: {
+      sessionId: 's1',
+      cwd: '/tmp',
+      status: 'idle',
+      model: null,
+      permissionMode: 'default',
+      effort: null,
+      availableModels: [],
+      availableCommands: [{ name: 'commit', description: '' }],
+      availableAgents: [],
+      mcpServers: [{ name: 'linear', status: 'connected', toolCount: 2 }],
+    },
+  });
+
+  fireEvent.click(screen.getByText('1 skills · 1 MCP'));
+  expect(screen.getByRole('button', { name: /skills/i }).getAttribute('aria-pressed')).toBe('true');
+});
+
 test('un message reçu apparaît dans la conversation', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
