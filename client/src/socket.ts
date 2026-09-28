@@ -14,6 +14,8 @@ const DISCONNECTED_STATE: SessionState = {
   status: 'disconnected',
   model: null,
   permissionMode: null,
+  effort: null,
+  availableModels: [],
 };
 
 export function connect(url: string, onEvent: (event: ServerEvent) => void): Connection {

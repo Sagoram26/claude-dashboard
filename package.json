@@ -12,7 +12,7 @@
     "dev:server": "node --experimental-strip-types server/index.ts",
     "dev:client": "vite",
     "build": "tsc -p tsconfig.server.json && vite build",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server-tests.json",
     "test": "node --experimental-strip-types --test server/**/*.test.ts",
     "test:client": "vitest run",
     "verify:e2e": "node scripts/verify-e2e.mjs"
