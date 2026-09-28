@@ -629,3 +629,79 @@ sur `status`, afficher la ligne quel que soit son statut.
   fichier ; les deux listes de valeurs observées sont identiques mais je ne
   peux pas affirmer qu'aucune troisième déclaration ne diverge, un fichier de
   9368 lignes n'a pas été lu en intégralité, seulement grep + zones ciblées.
+
+## Tranche 4
+
+Relevé le 2026-09-28, branche `tranche-4`. Même source unique
+(`node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts`), mêmes versions que
+ci-dessus.
+
+### Signatures — méthodes de contrôle entre étapes d'un workflow
+
+```ts
+// sdk.d.ts:2675
+setPermissionMode(mode: PermissionMode): Promise<void>;
+// sdk.d.ts:2703
+setModel(model?: string): Promise<void>;
+// sdk.d.ts:2749-2751
+applyFlagSettings(settings: {
+    [K in keyof Settings]?: K extends 'effortLevel' ? EffortLevel | null : Settings[K] | null;
+}): Promise<void>;
+```
+
+`PermissionMode` (sdk.d.ts:2366) : `'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'`.
+`EffortLevel` (sdk.d.ts:623) : `'low' | 'medium' | 'high' | 'xhigh' | 'max'`.
+
+Les trois méthodes rendent `Promise<void>` : aucun accusé de réception propre,
+aucune valeur à lire en retour pour confirmer l'application du réglage. Un
+checkpoint qui veut afficher « modèle changé en X » doit se fier à la valeur
+qu'il a lui-même envoyée, pas à une confirmation du SDK. `applyFlagSettings`
+prend un objet partiel fusionné dans les réglages de session ; passer
+uniquement `{ effortLevel }`, `{ model }` ou les deux ensemble ne touche pas
+aux autres clés de `Settings`. Toutes trois exigent le mode entrée en
+streaming (`Query` obtenu via `query()` avec `inputStream`), cohérent avec
+l'exécuteur de tranche 4 qui garde une session ouverte entre étapes plutôt que
+d'en ouvrir une nouvelle par étape (contrainte globale de Tranche4.md).
+
+### Signatures — `SDKControlInterruptResponse`
+
+```ts
+// sdk.d.ts:4337-4346
+export declare type SDKControlInterruptResponse = {
+    still_queued: string[];
+    cancelled?: string[];
+};
+```
+
+Casse serpent (`still_queued`, pas `stillQueued`), contrairement aux réponses
+de contrôle plus récentes comme `SDKControlGetContextUsageResponse` (tranche
+3, camelCase). `cancelled` n'apparaît que si la requête d'interruption portait
+`cancel_queued: true`. `interrupt()` peut rendre `undefined` sur un CLI plus
+ancien qui ne déclare pas la capacité `interrupt_receipt_v1` — un accusé de
+réception absent n'est pas une erreur, juste une CLI qui ne l'avertit pas.
+
+**Conséquence pour la feature 02 (exécuteur et barrières)** : la barrière n'a
+rien à lire dans le retour de `setModel`/`setPermissionMode`/
+`applyFlagSettings` pour confirmer le réglage appliqué ; le checkpoint reporte
+la valeur envoyée. Si l'exécuteur interrompt une étape (ex. « Corriger »
+avant la fin du tour), traiter `still_queued`/`cancelled` comme informatifs
+seulement — aucune des deux listes ne conditionne le passage à l'étape
+suivante, qui reste décidé par la case barrière et le tour applicatif normal.
+
+### Écart avec le plan
+
+Tranche4.md (feature 02, ligne 24) ne cite que `setModel()`,
+`setPermissionMode()` et `applyFlagSettings({effortLevel})` — confirmé exact,
+sans écart de nom ni de signature avec `sdk.d.ts`. Aucune supposition du plan
+n'a dû être corrigée pour ces trois méthodes.
+
+### Ce que je n'ai pas pu vérifier
+
+- Je n'ai pas vérifié si `still_queued`/`cancelled` sont déjà consommés
+  ailleurs dans `server/` (tranches 1-3) : aucune occurrence de `interrupt(`
+  dans `server/session/manager.ts` au moment du relevé — la feature 02 part
+  donc de zéro sur ce point, pas d'un usage existant à étendre.
+- Je n'ai pas relu l'intégralité de la définition de `Settings` (sdk.d.ts,
+  plusieurs milliers de lignes) pour lister toutes les clés que
+  `applyFlagSettings` peut fusionner au-delà d'`effortLevel` et `model` : hors
+  périmètre de la tranche 4, qui ne pilote que ces deux réglages par étape.
