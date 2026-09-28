@@ -35,6 +35,7 @@ export type AppState = {
   permissionMode: SessionState['permissionMode'];
   availableModels: SessionState['availableModels'];
   contextUsage: ContextUsage | null;
+  costUsd: number;
 };
 
 export const initialState: AppState = {
@@ -48,6 +49,7 @@ export const initialState: AppState = {
   permissionMode: null,
   availableModels: [],
   contextUsage: null,
+  costUsd: 0,
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -132,12 +134,16 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
     case 'context.usage':
       return { ...state, contextUsage: event.usage };
 
+    // `total_cost_usd` est deja cumulatif cote SDK (course en cours du query() courant) : on
+    // retient le dernier recu, on ne l additionne jamais a lui-meme sous peine de doubler le cout.
+    case 'cost.usage':
+      return { ...state, costUsd: event.totalUsd };
+
     // Événements de protocole encore sans consommateur (livrés au fil de la tranche 3). Listés
     // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
     case 'workflow.checkpoint':
     case 'files.changed':
     case 'git.state':
-    case 'cost.usage':
       return state;
 
     default: {

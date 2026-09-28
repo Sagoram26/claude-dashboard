@@ -122,7 +122,8 @@ export function Session() {
       </main>
       <Footer
         items={[
-          ...PLACEHOLDER_FOOTER.slice(0, 3),
+          ...PLACEHOLDER_FOOTER.slice(0, 2),
+          { text: `$${state.costUsd.toFixed(2)}`, align: 'right' },
           ...(state.contextUsage
             ? [
                 {
