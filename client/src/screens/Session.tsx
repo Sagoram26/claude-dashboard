@@ -122,7 +122,10 @@ export function Session() {
       </main>
       <Footer
         items={[
-          ...PLACEHOLDER_FOOTER.slice(0, 2),
+          state.git
+            ? { text: `${state.git.branch} · ${state.git.dirty} modifié(s) · ${state.git.staged} en stage` }
+            : PLACEHOLDER_FOOTER[0]!,
+          ...PLACEHOLDER_FOOTER.slice(1, 2),
           { text: `$${state.costUsd.toFixed(2)}`, align: 'right' },
           ...(state.contextUsage
             ? [

@@ -1,5 +1,7 @@
 import type {
+  ChangedFile,
   ContextUsage,
+  GitState,
   GrantedPermission,
   PermissionRequest,
   ServerEvent,
@@ -36,6 +38,8 @@ export type AppState = {
   availableModels: SessionState['availableModels'];
   contextUsage: ContextUsage | null;
   costUsd: number;
+  git: GitState | null;
+  changedFiles: ChangedFile[];
 };
 
 export const initialState: AppState = {
@@ -50,6 +54,8 @@ export const initialState: AppState = {
   availableModels: [],
   contextUsage: null,
   costUsd: 0,
+  git: null,
+  changedFiles: [],
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -139,11 +145,15 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
     case 'cost.usage':
       return { ...state, costUsd: event.totalUsd };
 
+    case 'git.state':
+      return { ...state, git: event.git };
+
+    case 'files.changed':
+      return { ...state, changedFiles: event.files };
+
     // Événements de protocole encore sans consommateur (livrés au fil de la tranche 3). Listés
     // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
     case 'workflow.checkpoint':
-    case 'files.changed':
-    case 'git.state':
       return state;
 
     default: {
