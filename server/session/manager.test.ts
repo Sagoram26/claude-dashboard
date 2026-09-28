@@ -532,6 +532,44 @@ test('les modeles disponibles sont pousses a l initialisation', async () => {
   await manager.stop();
 });
 
+test('a l initialisation, skills, subagents et serveurs mcp sont pousses dans l etat', async () => {
+  const control = fakeControl();
+  const supplement = {
+    supportedCommands: async () => [
+      { name: 'commit', description: 'ecrit un commit', argumentHint: '' },
+    ],
+    supportedAgents: async () => [{ name: 'Explore', description: 'recherche en lecture seule' }],
+    mcpServerStatus: async () => [
+      { name: 'linear', status: 'failed' as const, error: 'timeout' },
+      { name: 'github', status: 'connected' as const, tools: [{ name: 'create_issue' }] },
+    ],
+  };
+  const { query, push } = fakeQuery(() => [], { ...control.methods, ...supplement });
+  const etats: unknown[] = [];
+  const manager = createSessionManager({
+    cwd: '/tmp',
+    emit: (e) => { if (e.type === 'session.state') etats.push(e.state); },
+    queryFn: query,
+  });
+
+  push({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-opus-5', uuid: 'i1' });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const dernier = etats.at(-1) as {
+    availableCommands: unknown[];
+    availableAgents: unknown[];
+    mcpServers: unknown[];
+  };
+  assert.deepEqual(dernier.availableCommands, [{ name: 'commit', description: 'ecrit un commit' }]);
+  assert.deepEqual(dernier.availableAgents, [{ name: 'Explore', description: 'recherche en lecture seule' }]);
+  assert.deepEqual(dernier.mcpServers, [
+    { name: 'linear', status: 'failed', toolCount: 0, error: 'timeout' },
+    { name: 'github', status: 'connected', toolCount: 1, error: undefined },
+  ]);
+
+  await manager.stop();
+});
+
 test('un result declenche getContextUsage en detail summary et diffuse context.usage', async () => {
   const events: ServerEvent[] = [];
   const control = fakeControl();
