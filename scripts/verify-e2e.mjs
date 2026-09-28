@@ -141,7 +141,10 @@ function runScenario(port) {
         // sondant le SDK, pas supposé — trois passages de vérification ont été dépensés à croire
         // que le pont était cassé alors que c'était le scénario qui visait le mauvais outil.
         setTimeout(
-          () => send({ type: 'message.send', text: 'Utilise l outil Write pour creer le fichier dist/verif-e2e.txt contenant le mot ok' }),
+          // Nom de fichier unique à chaque passage : un nom fixe laisse le modèle relire un
+          // fichier déjà correct d'un passage précédent (via Read/Bash) au lieu d'appeler Write,
+          // et canUseTool ne se déclenche alors jamais — constaté en pratique, pas supposé.
+          () => send({ type: 'message.send', text: `Utilise l outil Write pour creer le fichier dist/verif-e2e-${Date.now()}.txt contenant le mot ok` }),
           300,
         );
         return;
