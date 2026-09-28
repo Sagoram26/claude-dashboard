@@ -44,6 +44,9 @@ test('la barre supérieure porte les contrôles runtime', () => {
       permissionMode: 'default',
       effort: 'high',
       availableModels: [{ value: 'claude-opus-5', displayName: 'Opus 5' }],
+      availableCommands: [],
+      availableAgents: [],
+      mcpServers: [],
     },
   });
 
@@ -171,7 +174,7 @@ test('cliquer le rappel des extensions bascule la barre laterale sur skills et m
   });
 
   fireEvent.click(screen.getByText('1 skills · 1 MCP'));
-  expect(screen.getByRole('button', { name: /skills/i }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: /skills et mcp/i }).getAttribute('aria-pressed')).toBe('true');
 });
 
 test('un message reçu apparaît dans la conversation', async () => {
@@ -216,6 +219,9 @@ test('l indicateur de génération apparaît et permet d interrompre', () => {
       permissionMode: 'default',
       effort: null,
       availableModels: [],
+      availableCommands: [],
+      availableAgents: [],
+      mcpServers: [],
     },
   });
 
@@ -287,6 +293,9 @@ test('la saisie reste utilisable pendant l attente', () => {
       permissionMode: 'default',
       effort: null,
       availableModels: [],
+      availableCommands: [],
+      availableAgents: [],
+      mcpServers: [],
     },
   });
   emit({ type: 'permission.request', request: demande });
@@ -321,6 +330,9 @@ test('echap ne coupe pas la generation quand les reglages sont ouverts', () => {
       permissionMode: null,
       effort: null,
       availableModels: [],
+      availableCommands: [],
+      availableAgents: [],
+      mcpServers: [],
     },
   });
 

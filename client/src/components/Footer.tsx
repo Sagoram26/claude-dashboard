@@ -2,6 +2,7 @@ export type FooterItem = {
   text: string;
   tone?: 'neutral' | 'warn' | 'ok';
   align?: 'left' | 'right';
+  onClick?: () => void;
 };
 
 const TONE_COLOR = {
@@ -15,7 +16,11 @@ export function Footer({ items }: { items: FooterItem[] }) {
   const right = items.filter((item) => item.align === 'right');
 
   const render = (item: FooterItem, index: number) => (
-    <span key={`${item.text}-${index}`} style={{ color: TONE_COLOR[item.tone ?? 'neutral'] }}>
+    <span
+      key={`${item.text}-${index}`}
+      onClick={item.onClick}
+      style={{ color: TONE_COLOR[item.tone ?? 'neutral'], cursor: item.onClick ? 'pointer' : undefined }}
+    >
       {item.text}
     </span>
   );

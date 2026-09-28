@@ -1,11 +1,12 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { TopBar } from '../components/TopBar.tsx';
 import { ControlMenu } from '../components/ControlMenu.tsx';
-import { Footer, type FooterItem } from '../components/Footer.tsx';
+import { Footer } from '../components/Footer.tsx';
 import { Conversation } from '../components/Conversation.tsx';
 import { Composer } from '../components/Composer.tsx';
 import { GeneratingIndicator } from '../components/GeneratingIndicator.tsx';
 import { PendingApprovalBar } from '../components/PendingApprovalBar.tsx';
+import { Sidebar, type SidebarColumn } from '../components/Sidebar.tsx';
 import { Settings } from './Settings.tsx';
 import { connect, type Connection } from '../socket.ts';
 import { initialState, reduceEvent, type ApprovalEntry } from '../state.ts';
@@ -15,19 +16,18 @@ const SOCKET_URL = `ws://${location.host}/ws`;
 const MODES = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-const PLACEHOLDER_FOOTER: FooterItem[] = [
-  { text: 'main' },
-  { text: 'claude-dashboard' },
-  { text: '$0.00', align: 'right' },
-  { text: 'connecté', tone: 'ok', align: 'right' },
-];
-
 const CONTEXT_ALERT_THRESHOLD = 80;
+
+function nomDuProjet(cwd: string): string {
+  const segments = cwd.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? cwd;
+}
 
 export function Session() {
   const [state, dispatch] = useReducer(reduceEvent, initialState);
   const connection = useRef<Connection | null>(null);
   const [screen, setScreen] = useState<'session' | 'settings'>('session');
+  const [sidebarColumn, setSidebarColumn] = useState<SidebarColumn>('accueil');
   const pendingApprovals = state.thread.filter(
     (e): e is ApprovalEntry => e.kind === 'approval' && e.decision === null
   );
@@ -73,7 +73,17 @@ export function Session() {
           tone={state.permissionMode === 'default' ? 'warn' : 'neutral'}
         />
       </TopBar>
-      <main role="main" style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <Sidebar
+          column={sidebarColumn}
+          onSelectColumn={setSidebarColumn}
+          changedFiles={state.changedFiles}
+          toolActivityCount={state.toolActivityCount}
+          availableCommands={state.availableCommands}
+          availableAgents={state.availableAgents}
+          mcpServers={state.mcpServers}
+        />
+        <main role="main" style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
         {screen === 'settings' ? (
           <Settings
             granted={state.granted}
@@ -119,13 +129,18 @@ export function Session() {
             />
           </div>
         )}
-      </main>
+        </main>
+      </div>
       <Footer
         items={[
           state.git
             ? { text: `${state.git.branch} · ${state.git.dirty} modifié(s) · ${state.git.staged} en stage` }
-            : PLACEHOLDER_FOOTER[0]!,
-          ...PLACEHOLDER_FOOTER.slice(1, 2),
+            : { text: '—' },
+          { text: nomDuProjet(state.cwd) },
+          {
+            text: `${state.availableCommands.length} skills · ${state.mcpServers.length} MCP`,
+            onClick: () => setSidebarColumn('skills'),
+          },
           { text: `$${state.costUsd.toFixed(2)}`, align: 'right' },
           ...(state.contextUsage
             ? [
@@ -136,10 +151,15 @@ export function Session() {
                       ? ('warn' as const)
                       : ('neutral' as const),
                   align: 'right' as const,
+                  onClick: () => setSidebarColumn('accueil'),
                 },
               ]
             : []),
-          ...PLACEHOLDER_FOOTER.slice(3),
+          {
+            text: state.status === 'disconnected' ? 'déconnecté' : 'connecté',
+            tone: state.status === 'disconnected' ? 'warn' : 'ok',
+            align: 'right',
+          },
         ]}
       />
     </div>
