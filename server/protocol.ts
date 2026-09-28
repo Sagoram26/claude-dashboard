@@ -88,6 +88,25 @@ export type WorkflowCheckpoint = {
   durationMs?: number;
 };
 
+export type WorkflowStep = {
+  id: string;
+  label: string;
+  /** Instruction envoyée à l'agent au démarrage de l'étape. */
+  prompt: string;
+  model?: string;
+  permissionMode?: string;
+  /** Nom d'un subagent dédié à l'étape ; absent = agent principal. */
+  subagent?: string;
+  /** Barrière optionnelle : suspend l'exécution en fin d'étape, attend un feu vert. */
+  gate: boolean;
+};
+
+export type WorkflowDefinition = {
+  id: string;
+  name: string;
+  steps: WorkflowStep[];
+};
+
 export type ChangedFile = { path: string; added: number; removed: number };
 
 export type GitState = { branch: string; dirty: number; staged: number };
