@@ -531,3 +531,56 @@ test('les modeles disponibles sont pousses a l initialisation', async () => {
   assert.deepEqual(dernier.map((m) => m.value), ['claude-opus-5', 'claude-sonnet-5']);
   await manager.stop();
 });
+
+test('un result declenche getContextUsage en detail summary et diffuse context.usage', async () => {
+  const events: ServerEvent[] = [];
+  const control = fakeControl();
+  let vuOpts: unknown;
+  const getContextUsage = async (opts: unknown) => {
+    vuOpts = opts;
+    return {
+      categories: [{ name: 'Messages', tokens: 400, color: '#fff', kind: 'used' as const }],
+      totalTokens: 400,
+      maxTokens: 1000,
+      rawMaxTokens: 1000,
+      percentage: 40,
+      gridRows: [],
+      model: 'claude-sonnet-5',
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: true,
+    };
+  };
+  const { query, push } = fakeQuery(() => [], { ...control.methods, getContextUsage });
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  push({ type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(vuOpts, { detail: 'summary' });
+  const usage = events.find((e) => e.type === 'context.usage');
+  assert.ok(usage && usage.type === 'context.usage');
+  assert.deepEqual(usage.usage, {
+    totalTokens: 400,
+    maxTokens: 1000,
+    percentage: 40,
+    categories: [{ name: 'Messages', tokens: 400 }],
+  });
+
+  await manager.stop();
+});
+
+test('un echec de getContextUsage emet une erreur sans faire tomber la session', async () => {
+  const events: ServerEvent[] = [];
+  const control = fakeControl();
+  const getContextUsage = async () => { throw new Error('boom'); };
+  const { query, push } = fakeQuery(() => [], { ...control.methods, getContextUsage });
+
+  const manager = createSessionManager({ cwd: '/tmp', emit: (e) => events.push(e), queryFn: query });
+  push({ type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: 'r1' });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.ok(events.some((e) => e.type === 'error' && e.message === 'boom'));
+  await manager.stop();
+});

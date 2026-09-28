@@ -58,6 +58,27 @@ test('le pied de page porte de l état, pas de bouton', () => {
   expect(footer.querySelectorAll('button').length).toBe(0);
 });
 
+test('la jauge de contexte affiche le pourcentage recu et alerte a 80%', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({
+    type: 'context.usage',
+    usage: { totalTokens: 400, maxTokens: 1000, percentage: 40, categories: [] },
+  });
+  let footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('40%');
+
+  emit({
+    type: 'context.usage',
+    usage: { totalTokens: 850, maxTokens: 1000, percentage: 85, categories: [] },
+  });
+  footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('85%');
+  const gauge = within(footer).getByText(/85%/);
+  expect(gauge.getAttribute('style')).toContain('--warn');
+});
+
 test('un message reçu apparaît dans la conversation', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 

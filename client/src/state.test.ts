@@ -185,3 +185,28 @@ test('un session.state met a jour modele effort mode et modeles disponibles', ()
   expect(state.permissionMode).toBe('plan');
   expect(state.availableModels).toEqual([{ value: 'claude-sonnet-5', displayName: 'Sonnet 5' }]);
 });
+
+test('context.usage remplace la jauge par la derniere valeur recue', () => {
+  const usage = {
+    totalTokens: 4000,
+    maxTokens: 5000,
+    percentage: 80,
+    categories: [{ name: 'Messages', tokens: 4000 }],
+  };
+  const state = reduceEvent(initialState, { type: 'context.usage', usage });
+
+  expect(state.contextUsage).toEqual(usage);
+});
+
+test('context.usage successifs ne s accumulent pas, seul le dernier compte', () => {
+  let state = reduceEvent(initialState, {
+    type: 'context.usage',
+    usage: { totalTokens: 1000, maxTokens: 5000, percentage: 20, categories: [] },
+  });
+  state = reduceEvent(state, {
+    type: 'context.usage',
+    usage: { totalTokens: 2000, maxTokens: 5000, percentage: 40, categories: [] },
+  });
+
+  expect(state.contextUsage?.percentage).toBe(40);
+});
