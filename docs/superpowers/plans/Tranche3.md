@@ -41,9 +41,18 @@ En fin de tranche, `grep -rn PLACEHOLDER client/src` ne doit plus rien rendre : 
 ## Critère de fin
 
 1. La ventilation du contexte est cohérente avec la session ; le total correspond à la jauge.
+   **Vérifié par `npm run verify:e2e`** contre le vrai SDK — 7 instantanés de contexte, `categories` toujours peuplé, `totalTokens <= maxTokens`, `percentage` dans `[0, 100]` — passe.
 2. Un compactage fait redescendre la jauge sans que la session perde le fil.
+   **Vérifié par `npm run verify:e2e`** : `context.compact` envoyé, une frontière `compact_boundary` réelle redéclenche `getContextUsage`, et la session répond encore à 2 messages après (6 réponses au total) — passe.
 3. Modifier un fichier hors de l'application met à jour le pied de page et la liste des fichiers.
+   **Vérifié par la couture** (`server/couture.test.ts`, « un fichier modifie hors de l application traverse jusqu a l etat du pied de page ») : `git-watcher` réel, `git` réel dans un dépôt jetable, `fs.watch` réel, jusqu'à `reduceEvent` — sans SDK, sans coût. Le rendu visuel exact dans le `<Footer>` d'un vrai navigateur n'est pas observé (aucun agent n'a de navigateur), mais `client/src/screens/Session.test.tsx` couvre le rendu depuis un événement `git.state` fabriqué.
 4. La section Activité reste repliée par défaut, son compteur s'incrémente.
+   **Vérifié par tests unitaires** (`client/src/components/Sidebar.test.tsx`) : repliée par défaut (`aria-expanded="false"`), le compteur affiche `toolActivityCount`, l'état déplié persiste en `localStorage` au remontage. Non observé en navigateur réel.
 5. Un serveur MCP hors ligne est signalé comme tel, pas masqué.
+   **Vérifié par tests unitaires** (`Sidebar.test.tsx` : un serveur `status: 'failed'` reste affiché avec son statut réel) et par `server/session/manager.test.ts` (aucun filtre sur `status` lors du mappage `mcpServerStatus()` → état). Aucun vrai serveur MCP hors ligne constaté en conditions réelles (`verify:e2e` n'en configure aucun).
 6. Fermer et rouvrir l'application : la session apparaît dans l'accueil avec des métadonnées justes, et la reprendre restitue le contexte de l'échange précédent.
+   **Partiellement vérifié.** `manager.history()` rejoue messages/activité/permissions à la reconnexion (tests unitaires `manager.test.ts`), et `HomeScreen`/`App.test.tsx` vérifient la navigation accueil → session sur une carte `resumable`. Portée assumée : une seule session vivante par serveur, liée à son `cwd` de démarrage — « fermer et rouvrir » couvre la reconnexion navigateur, pas un redémarrage du process serveur ni un changement de dossier (changement de dossier hors périmètre v1, noté dans `App.tsx`). Non observé en navigateur réel.
 7. Une session lancée hors du dashboard est listée mais annoncée comme non reprenable, sans échouer au clic.
+   **Vérifié par tests unitaires** (`server/session/recent.test.ts` : `entrypoint !== 'sdk'` ⇒ `fromDashboard: false` ; `HomeScreen.test.tsx` : carte affichée, mention « non reprenable », clic sans appeler `onOpen` ni lever d'exception). Heuristique (`entrypoint`), pas une garantie contractuelle du format de transcript — documenté comme tel dans `recent.ts`.
+
+Les points 1 et 2 dépendent de la forme réelle du SDK (`getContextUsage`, compaction) et sont couverts par `scripts/verify-e2e.mjs`. Les points 3 à 7 ne coûtent rien à vérifier (pas d'appel SDK) et sont couverts par couture/tests unitaires ; aucun n'est observé dans un vrai navigateur, faute d'agent en disposant.
