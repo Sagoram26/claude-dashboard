@@ -2,10 +2,13 @@ import { createServer as createHttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { parseClientCommand, type ClientCommand, type ServerEvent } from './protocol.ts';
+import type { RecentSession } from './session/recent.ts';
 
 export type ServerHandlers = {
   onCommand?: (cmd: ClientCommand, send: (event: ServerEvent) => void) => void;
   onConnect?: (send: (event: ServerEvent) => void) => void;
+  /** Peuple l'écran d'accueil (feature 06). Absent en test : /sessions rend alors une liste vide. */
+  listSessions?: () => Promise<RecentSession[]>;
 };
 
 export async function createServer(
@@ -16,6 +19,13 @@ export async function createServer(
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.url === '/sessions') {
+      void (handlers.listSessions?.() ?? Promise.resolve([])).then((sessions) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(sessions));
+      });
       return;
     }
     res.writeHead(404);
@@ -70,14 +80,21 @@ if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
   const { createPermissionStore } = await import('./session/permission-store.ts');
   const { createGitWatcher } = await import('./session/git-watcher.ts');
+  const { listRecentSessions } = await import('./session/recent.ts');
+  const { homedir } = await import('node:os');
+  const { join } = await import('node:path');
 
   let manager: ReturnType<typeof createSessionManager> | null = null;
   let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
+    listSessions: () => listRecentSessions(join(homedir(), '.claude', 'projects')),
     onConnect: (send) => {
       if (!manager) return;
       send({ type: 'session.state', state: manager.state() });
+      // Rejoue le fil complet avant les demandes en attente : reprendre une session (feature 06)
+      // doit restituer le contexte de l'échange précédent, pas repartir d'une conversation vide.
+      for (const event of manager.history()) send(event);
       for (const request of manager.pendingPermissions()) {
         send({ type: 'permission.request', request });
       }

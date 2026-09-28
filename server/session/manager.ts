@@ -42,6 +42,14 @@ export type SessionManager = {
   compact(): void;
   /** `detail: 'full'`, réservé à l'ouverture du popover de contexte. */
   requestContextDetail(): void;
+  /**
+   * Événements rejouables pour un client qui se (re)connecte : messages, activité d'outil et
+   * demandes de permission (avec leur résolution), dans l'ordre où ils se sont produits. Sans ce
+   * rejeu, reprendre une session (feature 06) restitue l'état d'exécution courant mais un fil de
+   * conversation vide — le critère de fin l'exige plein.
+   * N'inclut jamais `message.delta` (fragments transitoires) ni `session.state` (déjà renvoyé à part).
+   */
+  history(): ServerEvent[];
 };
 
 export function createSessionManager(opts: SessionManagerOptions): SessionManager {
@@ -68,17 +76,31 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
   // complete doivent coïncider, sinon le client affiche le texte deux fois.
   let streamingMessageId: string | null = null;
 
+  const history: ServerEvent[] = [];
+  const HISTORY_TYPES = new Set<ServerEvent['type']>([
+    'message.complete',
+    'tool.activity',
+    'permission.request',
+    'permission.resolved',
+  ]);
+  // Tout passe par ici plutôt que par `opts.emit` directement : c'est le seul point qui décide ce
+  // qui est rejouable (feature 06), sans risquer qu'un futur appel direct à `opts.emit` l'oublie.
+  const record = (event: ServerEvent): void => {
+    if (HISTORY_TYPES.has(event.type)) history.push(event);
+    opts.emit(event);
+  };
+
   const setState = (patch: Partial<SessionState>) => {
     state = { ...state, ...patch };
-    opts.emit({ type: 'session.state', state });
+    record({ type: 'session.state', state });
   };
 
   const emitError = (err: unknown) => {
-    opts.emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+    record({ type: 'error', message: err instanceof Error ? err.message : String(err) });
   };
 
   const permissions = createPermissionBridge({
-    emit: opts.emit,
+    emit: record,
     onPendingChange: (count) => {
       if (count > 0) setState({ status: 'awaiting-permission' });
       else if (state.status === 'awaiting-permission') setState({ status: 'generating' });
@@ -92,7 +114,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       void opts.store
         ?.grant(toolName)
         .then(() => {
-          opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
+          record({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
         })
         .catch(emitError);
     },
@@ -191,7 +213,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
         if (block.type === 'text') {
           texts.push(block.text);
         } else if (block.type === 'tool_use') {
-          opts.emit({
+          record({
             type: 'tool.activity',
             toolUseId: block.id,
             name: block.name,
@@ -201,7 +223,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       }
 
       if (texts.length > 0) {
-        opts.emit({
+        record({
           type: 'message.complete',
           messageId: message.message.id,
           role: 'assistant',
@@ -215,7 +237,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
       streamingMessageId = null;
       setState({ status: 'idle', sessionId: message.session_id });
       if ('total_cost_usd' in message) {
-        opts.emit({ type: 'cost.usage', totalUsd: message.total_cost_usd });
+        record({ type: 'cost.usage', totalUsd: message.total_cost_usd });
       }
       refreshContextUsage('summary');
       return;
@@ -236,7 +258,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     try {
       void session
         .getContextUsage({ detail })
-        .then((usage) => opts.emit({ type: 'context.usage', usage: toContextUsage(usage) }))
+        .then((usage) => record({ type: 'context.usage', usage: toContextUsage(usage) }))
         .catch(emitError);
     } catch (err) {
       emitError(err);
@@ -260,7 +282,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     if (event.type !== 'content_block_delta' || event.delta.type !== 'text_delta') return;
     if (streamingMessageId === null) return;
 
-    opts.emit({ type: 'message.delta', messageId: streamingMessageId, text: event.delta.text });
+    record({ type: 'message.delta', messageId: streamingMessageId, text: event.delta.text });
   }
 
   // Valeurs exactes du SDK (sdk.d.ts:2366 et 623). `bypassPermissions` est volontairement absent de
@@ -283,7 +305,7 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     send(text: string) {
       setState({ status: 'generating' });
       // Le serveur pousse l'état : l'écho du message utilisateur vient d'ici, pas du client.
-      opts.emit({ type: 'message.complete', messageId: randomUUID(), role: 'user', text });
+      record({ type: 'message.complete', messageId: randomUUID(), role: 'user', text });
       queue.push({
         type: 'user',
         message: { role: 'user', content: text },
@@ -317,10 +339,12 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
 
     async revokePermission(toolName) {
       await opts.store?.revoke(toolName);
-      opts.emit({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
+      record({ type: 'permission.granted', granted: opts.store?.list() ?? [] });
     },
 
     control: () => session,
+
+    history: () => [...history],
 
     compact() {
       queue.push({
