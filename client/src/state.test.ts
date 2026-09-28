@@ -210,3 +210,10 @@ test('context.usage successifs ne s accumulent pas, seul le dernier compte', () 
 
   expect(state.contextUsage?.percentage).toBe(40);
 });
+
+test('cost.usage retient le dernier total, sans les additionner', () => {
+  let state = reduceEvent(initialState, { type: 'cost.usage', totalUsd: 0.12 });
+  state = reduceEvent(state, { type: 'cost.usage', totalUsd: 0.34 });
+
+  expect(state.costUsd).toBe(0.34);
+});

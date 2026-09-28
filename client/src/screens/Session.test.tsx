@@ -79,6 +79,16 @@ test('la jauge de contexte affiche le pourcentage recu et alerte a 80%', () => {
   expect(gauge.getAttribute('style')).toContain('--warn');
 });
 
+test('le cout cumule remplace le placeholder du pied de page', () => {
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  render(<Session />);
+
+  emit({ type: 'cost.usage', totalUsd: 1.236 });
+  const footer = screen.getByRole('contentinfo');
+  expect(footer.textContent).toContain('$1.24');
+  expect(footer.textContent).not.toContain('$0.00');
+});
+
 test('un message reçu apparaît dans la conversation', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 
