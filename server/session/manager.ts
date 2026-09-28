@@ -50,6 +50,9 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
     permissionMode: 'default',
     effort: null,
     availableModels: [],
+    availableCommands: [],
+    availableAgents: [],
+    mcpServers: [],
   };
 
   // Identifiant du message assistant en cours de streaming. C'est l'id de message de l'API
@@ -121,6 +124,43 @@ export function createSessionManager(opts: SessionManagerOptions): SessionManage
           .supportedModels()
           .then((models) =>
             setState({ availableModels: models.map((m) => ({ value: m.value, displayName: m.displayName })) })
+          )
+          .catch(emitError);
+      } catch (err) {
+        emitError(err);
+      }
+      try {
+        void session
+          .supportedCommands()
+          .then((commands) =>
+            setState({ availableCommands: commands.map((c) => ({ name: c.name, description: c.description })) })
+          )
+          .catch(emitError);
+      } catch (err) {
+        emitError(err);
+      }
+      try {
+        void session
+          .supportedAgents()
+          .then((agents) =>
+            setState({ availableAgents: agents.map((a) => ({ name: a.name, description: a.description })) })
+          )
+          .catch(emitError);
+      } catch (err) {
+        emitError(err);
+      }
+      try {
+        void session
+          .mcpServerStatus()
+          .then((servers) =>
+            setState({
+              mcpServers: servers.map((s) => ({
+                name: s.name,
+                status: s.status,
+                toolCount: s.tools?.length ?? 0,
+                error: s.error,
+              })),
+            })
           )
           .catch(emitError);
       } catch (err) {

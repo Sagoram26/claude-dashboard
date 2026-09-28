@@ -177,6 +177,9 @@ test('un session.state met a jour modele effort mode et modeles disponibles', ()
       permissionMode: 'plan',
       effort: 'high',
       availableModels: [{ value: 'claude-sonnet-5', displayName: 'Sonnet 5' }],
+      availableCommands: [{ name: 'commit', description: 'ecrit un commit' }],
+      availableAgents: [{ name: 'Explore', description: 'recherche en lecture seule' }],
+      mcpServers: [{ name: 'linear', status: 'connected', toolCount: 3 }],
     },
   });
 
@@ -184,6 +187,10 @@ test('un session.state met a jour modele effort mode et modeles disponibles', ()
   expect(state.effort).toBe('high');
   expect(state.permissionMode).toBe('plan');
   expect(state.availableModels).toEqual([{ value: 'claude-sonnet-5', displayName: 'Sonnet 5' }]);
+  expect(state.availableCommands).toEqual([{ name: 'commit', description: 'ecrit un commit' }]);
+  expect(state.availableAgents).toEqual([{ name: 'Explore', description: 'recherche en lecture seule' }]);
+  expect(state.mcpServers).toEqual([{ name: 'linear', status: 'connected', toolCount: 3 }]);
+  expect(state.cwd).toBe('/tmp');
 });
 
 test('context.usage remplace la jauge par la derniere valeur recue', () => {

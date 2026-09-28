@@ -16,6 +16,9 @@ const DISCONNECTED_STATE: SessionState = {
   permissionMode: null,
   effort: null,
   availableModels: [],
+  availableCommands: [],
+  availableAgents: [],
+  mcpServers: [],
 };
 
 export function connect(url: string, onEvent: (event: ServerEvent) => void): Connection {

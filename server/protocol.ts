@@ -37,6 +37,16 @@ export type SessionState = {
   effort: string | null;
   /** Peuplé par `query.supportedModels()`. Vide tant que la session n'est pas établie. */
   availableModels: { value: string; displayName: string }[];
+  /** Peuplé par `query.supportedCommands()` (les skills, malgré le nom du type SDK). */
+  availableCommands: { name: string; description: string }[];
+  /** Peuplé par `query.supportedAgents()`. */
+  availableAgents: { name: string; description: string }[];
+  /**
+   * Peuplé par `query.mcpServerStatus()` une fois à l'initialisation. Un serveur hors ligne
+   * apparaît ici avec son `status` réel ('failed' | 'needs-auth' | 'pending' | 'disabled') :
+   * ne jamais filtrer dessus côté rendu, le critère de fin de tranche 3 l'exige explicitement.
+   */
+  mcpServers: { name: string; status: string; toolCount: number; error?: string }[];
 };
 
 export type PermissionRequest = {
