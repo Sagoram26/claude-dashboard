@@ -1,10 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { createServer } from './index.ts';
 import { createSessionManager } from './session/manager.ts';
+import { createGitWatcher } from './session/git-watcher.ts';
 import { reduceEvent, initialState, type AppState } from '../client/src/state.ts';
 import { parseClientCommand, type ServerEvent } from './protocol.ts';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Le seul double autorisé ici : le `query` du SDK. Il déclenche `canUseTool` avec des arguments
@@ -243,5 +251,51 @@ test('le message de l utilisateur et le streaming traversent aussi', async () =>
   assert.equal(messages[1]?.kind === 'message' && messages[1].text, 'fait');
 
   await fermer();
+});
+
+/**
+ * Couture tranche 3 : un fichier modifié hors de l'application (par un éditeur, pas par un outil
+ * observé) doit mettre à jour le pied de page et la liste des fichiers — critère de fin, point 3.
+ * Aucun SDK ici : `createGitWatcher` réel, `git` réel dans un dépôt jetable, `fs.watch` réel.
+ */
+test('un fichier modifie hors de l application traverse jusqu a l etat du pied de page', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-git-'));
+  const git = (...args: string[]) => execFileAsync('git', args, { cwd: dir });
+
+  await git('init', '-q');
+  await git('config', 'user.email', 'test@example.com');
+  await git('config', 'user.name', 'Test');
+  await writeFile(join(dir, 'a.ts'), 'un\ndeux\ntrois\n');
+  await git('add', '.');
+  await git('commit', '-q', '-m', 'initial');
+
+  const server = await createServer(0);
+  const gitWatcher = createGitWatcher({ cwd: dir, emit: (e) => server.broadcast(e) });
+
+  let state: AppState = initialState;
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+  socket.on('message', (raw) => {
+    state = reduceEvent(state, JSON.parse(raw.toString()) as ServerEvent);
+  });
+  await new Promise((resolve) => socket.on('open', resolve));
+
+  // Modification "hors de l'application" : une écriture fs directe, jamais un outil observé par
+  // le gestionnaire de session (qui n'existe même pas dans ce test).
+  await writeFile(join(dir, 'a.ts'), 'un\ndeux\ntrois\nquatre\n');
+
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && state.changedFiles.length === 0) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  assert.equal(state.changedFiles.length, 1, 'le fichier modifie doit apparaitre sans double de protocole');
+  assert.equal(state.changedFiles[0]?.path, 'a.ts');
+  assert.equal(state.changedFiles[0]?.added, 1);
+  assert.equal(state.changedFiles[0]?.removed, 0);
+  assert.ok(state.git !== null && state.git.dirty >= 1, 'le pied de page doit refleter au moins un fichier modifie');
+
+  gitWatcher.stop();
+  socket.close();
+  await server.close();
 });
 

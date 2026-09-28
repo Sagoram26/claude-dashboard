@@ -55,15 +55,17 @@ function runScenario(port) {
     const toolActivity = [];
     const permissionRequests = [];
     const permissionResolved = [];
+    const contextUsages = [];
     let userEcho = null;
     let interruptedText = null;
     let phase = 1;
     let totalUsd = 0;
+    let usagesAvantCompactage = 0;
 
     const send = (o) => ws.send(JSON.stringify(o));
     const snapshot = () => ({
       deltaIds, completeIds, errors, statuses, userEcho, interruptedText, totalUsd, toolActivity,
-      permissionRequests, permissionResolved,
+      permissionRequests, permissionResolved, contextUsages, usagesAvantCompactage,
     });
     const done = () => {
       ws.close();
@@ -88,6 +90,7 @@ function runScenario(port) {
       if (e.type === 'session.state') statuses.push(e.state.status);
       if (e.type === 'tool.activity') toolActivity.push(e.name);
       if (e.type === 'cost.usage') totalUsd = e.totalUsd;
+      if (e.type === 'context.usage') contextUsages.push(e.usage);
       if (e.type === 'message.complete' && e.role === 'user') userEcho = e.text;
 
       if (e.type === 'permission.request') {
@@ -141,6 +144,17 @@ function runScenario(port) {
           () => send({ type: 'message.send', text: 'Utilise l outil Write pour creer le fichier dist/verif-e2e.txt contenant le mot ok' }),
           300,
         );
+        return;
+      }
+
+      if (phase === 5) {
+        phase = 6;
+        console.log('[compactage] La jauge redescend-elle sans que la session perde le fil ?');
+        setTimeout(() => {
+          usagesAvantCompactage = contextUsages.length;
+          send({ type: 'context.compact' });
+          setTimeout(() => send({ type: 'message.send', text: 'Dis juste: ok' }), 2000);
+        }, 300);
         return;
       }
 
@@ -243,6 +257,19 @@ check(
   'la reponse debloque la demande',
   r.permissionRequests.length > 0 && r.permissionResolved.length === r.permissionRequests.length,
   `${r.permissionResolved.length} resolues sur ${r.permissionRequests.length}`,
+);
+
+check(
+  'la ventilation du contexte est peuplee et le total correspond a la jauge',
+  r.contextUsages.length > 0 &&
+    r.contextUsages.every((u) => u.categories.length > 0 && u.totalTokens <= u.maxTokens && u.percentage >= 0 && u.percentage <= 100),
+  `${r.contextUsages.length} instantane(s) de contexte`,
+);
+
+check(
+  'un compactage redeclenche la jauge sans que la session perde le fil',
+  r.contextUsages.length > r.usagesAvantCompactage && r.completeIds.size >= 6,
+  `${r.contextUsages.length - r.usagesAvantCompactage} instantane(s) apres compactage, ${r.completeIds.size} reponses au total`,
 );
 
 check('aucune erreur', r.errors.length === 0, r.errors.join(' | ') || 'aucune');
