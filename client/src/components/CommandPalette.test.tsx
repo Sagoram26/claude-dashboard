@@ -128,6 +128,22 @@ test('Escape appelle onClose', () => {
   expect(closed).toEqual([true]);
 });
 
+// I3 : Session.tsx ecoute Echap sur `window` pour interrompre la generation en cours. Fermer la
+// palette avec Echap ne doit pas laisser l'evenement remonter jusqu'a ce listener.
+test('Escape n appelle pas de callback externe (stopPropagation, I3)', () => {
+  const interrupted: boolean[] = [];
+  const onWindowEscape = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') interrupted.push(true);
+  };
+  window.addEventListener('keydown', onWindowEscape);
+
+  render(<CommandPalette open={true} items={[item()]} onSelect={() => {}} onClose={() => {}} />);
+  fireEvent.keyDown(screen.getByLabelText(/rechercher une commande/i), { key: 'Escape' });
+
+  window.removeEventListener('keydown', onWindowEscape);
+  expect(interrupted).toEqual([]);
+});
+
 test('aucun resultat apres filtrage affiche un message dedie', () => {
   render(<CommandPalette open={true} items={[item({ label: 'Seul item' })]} onSelect={() => {}} onClose={() => {}} />);
 

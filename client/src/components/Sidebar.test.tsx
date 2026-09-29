@@ -77,12 +77,12 @@ test('colonne skills et mcp : un serveur hors ligne reste visible avec son statu
   expect(within(section.parentElement!).getByText(/failed/)).toBeTruthy();
 });
 
-test('colonne lancer : les subagents sont listes et le fan-out est desactive', () => {
+test('colonne lancer : les subagents sont listes et le fan-out annonce la v2 (critere de fin, point 8)', () => {
   render(<Sidebar {...base} column="lancer" />);
 
   expect(screen.getByText('Explore')).toBeTruthy();
   expect(screen.getByText(/fan-out/i)).toBeTruthy();
-  expect(screen.getByText(/désactiv|desactiv/i)).toBeTruthy();
+  expect(screen.getByText(/v2/i)).toBeTruthy();
 });
 
 test('colonne lancer : la section prompts affiche la bibliotheque de prompts', () => {

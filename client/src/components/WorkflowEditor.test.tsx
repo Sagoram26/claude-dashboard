@@ -51,7 +51,7 @@ test('le bouton nouveau workflow ajoute une entree editable avec au moins une et
   expect(screen.getByRole('checkbox', { name: /barrière/i })).toBeTruthy();
 });
 
-test('chaque etape affiche un champ modele, un champ subagent optionnel et une case barriere', () => {
+test('chaque etape affiche un champ modele, un champ mode de permission et une case barriere', () => {
   render(
     <WorkflowEditor
       workflows={[workflow()]}
@@ -63,12 +63,52 @@ test('chaque etape affiche un champ modele, un champ subagent optionnel et une c
   );
 
   expect(screen.getByRole('combobox', { name: /modèle/i })).toBeTruthy();
-  const subagentSelect = screen.getByRole('combobox', { name: /subagent/i }) as HTMLSelectElement;
-  const optionValues = Array.from(subagentSelect.options).map((o) => o.value);
+  const modeSelect = screen.getByRole('combobox', { name: /mode de permission/i }) as HTMLSelectElement;
+  const optionValues = Array.from(modeSelect.options).map((o) => o.value);
   expect(optionValues).toContain('');
-  expect(optionValues).toContain('reviewer');
-  expect(optionValues).toContain('tester');
+  expect(optionValues).toContain('default');
+  expect(optionValues).toContain('acceptEdits');
+  expect(optionValues).toContain('plan');
+  expect(optionValues).toContain('dontAsk');
+  expect(optionValues).toContain('auto');
   expect(screen.getByRole('checkbox', { name: /barrière/i })).toBeTruthy();
+});
+
+// I5, option (a) : le choix de subagent par etape n'est transmis nulle part cote executeur
+// (server/workflows/executor.ts ne lit que model/permissionMode) ; retire le select trompeur.
+test('aucun champ subagent n est affiche par etape (I5, option a)', () => {
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={() => {}}
+      onDelete={() => {}}
+    />
+  );
+
+  expect(screen.queryByRole('combobox', { name: /subagent/i })).toBeNull();
+});
+
+test('choisir un mode de permission par etape puis sauvegarder le transmet a onSave', () => {
+  const saved: WorkflowDefinition[] = [];
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={(w) => saved.push(w)}
+      onDelete={() => {}}
+    />
+  );
+
+  fireEvent.change(screen.getByRole('combobox', { name: /mode de permission/i }), {
+    target: { value: 'plan' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^enregistrer$/i }));
+
+  expect(saved).toHaveLength(1);
+  expect(saved[0]?.steps[0]?.permissionMode).toBe('plan');
 });
 
 test('cocher la case barriere puis sauvegarder appelle onSave avec gate a true', () => {
@@ -124,4 +164,96 @@ test('supprimer un workflow appelle onDelete avec le bon id', () => {
   fireEvent.click(screen.getByRole('button', { name: /supprimer/i }));
 
   expect(deleted).toEqual(['w1']);
+});
+
+// B1 : emptyWorkflow() ne créait qu'une seule étape, sans moyen d'en ajouter/retirer après coup.
+test('le bouton Ajouter une etape ajoute une etape supplementaire', () => {
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={() => {}}
+      onDelete={() => {}}
+    />
+  );
+
+  expect(screen.getAllByLabelText(/nom de l'étape/i)).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: /ajouter une étape/i }));
+  expect(screen.getAllByLabelText(/nom de l'étape/i)).toHaveLength(2);
+});
+
+test('le bouton Retirer supprime une etape, sans jamais descendre sous une etape', () => {
+  const saved: WorkflowDefinition[] = [];
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={(w) => saved.push(w)}
+      onDelete={() => {}}
+    />
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /ajouter une étape/i }));
+  expect(screen.getAllByLabelText(/nom de l'étape/i)).toHaveLength(2);
+
+  const retirer = screen.getAllByRole('button', { name: /retirer/i });
+  fireEvent.click(retirer[0]!);
+  expect(screen.getAllByLabelText(/nom de l'étape/i)).toHaveLength(1);
+
+  // Une seule étape restante : le bouton Retirer disparaît (ou est desactive) pour l'empêcher de
+  // tomber à zéro étape.
+  expect(screen.queryAllByRole('button', { name: /retirer/i })).toHaveLength(0);
+
+  fireEvent.click(screen.getByRole('button', { name: /^enregistrer$/i }));
+  expect(saved[0]?.steps).toHaveLength(1);
+});
+
+test('un input Nom du workflow est editable et transmis a onSave', () => {
+  const saved: WorkflowDefinition[] = [];
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={(w) => saved.push(w)}
+      onDelete={() => {}}
+    />
+  );
+
+  fireEvent.change(screen.getByLabelText(/nom du workflow/i), { target: { value: 'Nom modifie' } });
+  fireEvent.click(screen.getByRole('button', { name: /^enregistrer$/i }));
+
+  expect(saved).toHaveLength(1);
+  expect(saved[0]?.name).toBe('Nom modifie');
+});
+
+// I4 : useState(prop) figeait les brouillons a la valeur initiale ; une mise a jour externe
+// (workflows.list recu du serveur apres un save/delete ailleurs) ne se reflète jamais.
+test('les brouillons se resynchronisent quand la prop workflows change (I4)', () => {
+  const { rerender } = render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={() => {}}
+      onDelete={() => {}}
+    />
+  );
+
+  expect(screen.getByText('Mon workflow')).toBeTruthy();
+
+  rerender(
+    <WorkflowEditor
+      workflows={[workflow({ id: 'w2', name: 'Workflow externe' })]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={() => {}}
+      onDelete={() => {}}
+    />
+  );
+
+  expect(screen.queryByText('Mon workflow')).toBeNull();
+  expect(screen.getByText('Workflow externe')).toBeTruthy();
 });

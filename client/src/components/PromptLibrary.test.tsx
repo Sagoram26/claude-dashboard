@@ -81,6 +81,36 @@ test('le bouton epingle appelle onTogglePin avec le bon id', () => {
   expect(toggled).toEqual(['p1']);
 });
 
+// I4 : useState(prop) figeait les brouillons a la valeur initiale ; "Supprimer" laissait la carte
+// affichee jusqu'au prochain montage, l'etoile d'epinglage ne se mettait pas a jour apres un
+// prompts.list recu du serveur.
+test('les brouillons se resynchronisent quand la prop prompts change (I4)', () => {
+  const { rerender } = render(
+    <PromptLibrary
+      prompts={[prompt()]}
+      onLaunch={() => {}}
+      onSave={() => {}}
+      onDelete={() => {}}
+      onTogglePin={() => {}}
+    />
+  );
+
+  expect(screen.getByDisplayValue('Mon prompt')).toBeTruthy();
+
+  rerender(
+    <PromptLibrary
+      prompts={[prompt({ id: 'p2', name: 'Prompt externe' })]}
+      onLaunch={() => {}}
+      onSave={() => {}}
+      onDelete={() => {}}
+      onTogglePin={() => {}}
+    />
+  );
+
+  expect(screen.queryByDisplayValue('Mon prompt')).toBeNull();
+  expect(screen.getByDisplayValue('Prompt externe')).toBeTruthy();
+});
+
 test('Supprimer appelle onDelete avec le bon id', () => {
   const deleted: string[] = [];
   render(
