@@ -75,6 +75,7 @@ export function CommandPalette({ open, items, onSelect, onClose }: CommandPalett
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') onClose();
+            if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0]!);
           }}
           placeholder="Rechercher une commande..."
           style={{
