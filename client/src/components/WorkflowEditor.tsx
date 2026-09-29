@@ -48,6 +48,13 @@ function StepEditor({
         onChange={(e) => onChange({ ...step, label: e.target.value })}
         style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
       />
+      <textarea
+        aria-label="Prompt"
+        value={step.prompt}
+        onChange={(e) => onChange({ ...step, prompt: e.target.value })}
+        rows={3}
+        style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', font: 'inherit' }}
+      />
       <select
         aria-label="Modèle"
         value={step.model ?? ''}
