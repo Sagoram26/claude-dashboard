@@ -173,6 +173,67 @@ test('continueAfterGate() et correctAtGate() hors état gated ne font rien (pas 
   assert.equal(f.sendCalls.length, 0);
 });
 
+// I2 : le nombre d'appels a applyRuntime ne prouve pas que le REGLAGE de chaque etape est
+// applique. Verifie le contenu, pas seulement le compte.
+test('applyRuntime recoit le model de CHAQUE etape, pas seulement celui de la premiere', async () => {
+  const f = fakeDeps();
+  const executor = createWorkflowExecutor(f.deps);
+  const wf = workflow([
+    { id: 's1', label: 'Étape 1', prompt: 'p1', model: 'model-a', gate: false },
+    { id: 's2', label: 'Étape 2', prompt: 'p2', model: 'model-b', gate: false },
+    { id: 's3', label: 'Étape 3', prompt: 'p3', model: 'model-c', gate: false },
+  ]);
+
+  const started = executor.start(wf);
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setImmediate(r));
+    f.resolveTurn();
+  }
+  await started;
+
+  assert.equal(f.applyRuntimeCalls.length, 3);
+  assert.equal(f.applyRuntimeCalls[0]?.model, 'model-a');
+  assert.equal(f.applyRuntimeCalls[1]?.model, 'model-b');
+  assert.equal(f.applyRuntimeCalls[2]?.model, 'model-c');
+});
+
+// B2 : internalState.status restait 'gated' pendant toute l'etape suivante (jusqu'a la prochaine
+// barriere ou 'done'), donc un second appel a continueAfterGate() (double-clic, ou un vieux
+// bouton reste affiche) relancait runFrom(i+1) une deuxieme fois EN PARALLELE.
+test("continueAfterGate() appele deux fois de suite n avance pas deux fois (B2)", async () => {
+  const f = fakeDeps();
+  const executor = createWorkflowExecutor(f.deps);
+  const wf = workflow([
+    { id: 's1', label: 'Étape 1', prompt: 'p1', gate: true },
+    { id: 's2', label: 'Étape 2', prompt: 'p2', gate: false },
+  ]);
+
+  const started = executor.start(wf);
+  await new Promise((r) => setImmediate(r));
+  f.resolveTurn();
+  await started;
+
+  assert.equal(executor.state()?.status, 'gated');
+
+  // Double appel synchrone, comme un double-clic : le second doit voir un etat deja 'running' et
+  // ne rien refaire.
+  const premier = executor.continueAfterGate();
+  const second = executor.continueAfterGate();
+
+  await new Promise((r) => setImmediate(r));
+  f.resolveTurn();
+  await Promise.all([premier, second]);
+
+  assert.equal(f.sendCalls.length, 2, "l'etape 2 ne doit etre envoyee qu'une seule fois");
+  assert.deepEqual(f.sendCalls, ['p1', 'p2']);
+  assert.equal(
+    f.checkpoints.filter((c) => c.id === 's2' && c.status === 'running').length,
+    1,
+    "un seul checkpoint 'running' pour s2, pas deux executions paralleles"
+  );
+  assert.equal(executor.state()?.status, 'done');
+});
+
 test('une étape sans model/permissionMode/subagent ne passe pas ces clés à applyRuntime', async () => {
   const f = fakeDeps();
   const executor = createWorkflowExecutor(f.deps);
