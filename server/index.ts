@@ -80,19 +80,35 @@ export async function createServer(
  * `SessionManager` (déjà testée par `manager.test.ts`) : broadcast l'événement normalement, et
  * résout les attentes en cours quand le statut repasse à `'idle'`. Motif classique (liste de
  * résolveurs vidée à chaque passage), utilitaire local, pas de module séparé pour si peu.
+ *
+ * Correctif round 1 de revue de la feature 06 : chaque attente est taguée par un jeton `owner`
+ * propre à l'exécuteur qui l'a enregistrée (voir `workflow.start` plus bas). Au passage à
+ * `'idle'`, seuls les résolveurs dont le jeton correspond encore au propriétaire courant
+ * (`getActiveOwner()`) sont débloqués. Sans ce filtrage, un `workflow.start` qui remplace
+ * `activeExecutor` pendant qu'un workflow tourne déjà laissait l'ancien exécuteur partager la
+ * même closure `waiters`/`manager.send` que le nouveau : au prochain `'idle'`, l'ancien reprenait
+ * sa propre séquence EN PARALLÈLE du nouveau, entrelaçant deux `manager.send()` dans la même
+ * session et diffusant les checkpoints des deux workflows sans distinction. Ici, un exécuteur
+ * remplacé reste bloqué indéfiniment sur son `waitForTurnEnd()` en cours — un abandon silencieux,
+ * pas une annulation active de l'appel SDK — et son `emitCheckpoint` (ci-dessous) est lui aussi
+ * gardé par le même jeton pour ne jamais diffuser les checkpoints d'un exécuteur abandonné.
  */
-function creerAttenteDeTour(broadcast: (e: ServerEvent) => void) {
-  let waiters: Array<() => void> = [];
+function creerAttenteDeTour(broadcast: (e: ServerEvent) => void, getActiveOwner: () => unknown) {
+  let waiters: Array<{ resolve: () => void; owner: unknown }> = [];
   const emit = (event: ServerEvent) => {
     broadcast(event);
     if (event.type === 'session.state' && event.state.status === 'idle') {
       const toWake = waiters;
       waiters = [];
-      for (const w of toWake) w();
+      const active = getActiveOwner();
+      for (const w of toWake) {
+        if (w.owner === active) w.resolve();
+      }
     }
   };
-  const waitForTurnEnd = () => new Promise<void>((resolve) => waiters.push(resolve));
-  return { emit, waitForTurnEnd };
+  const waitForTurnEndFor = (owner: unknown) => () =>
+    new Promise<void>((resolve) => waiters.push({ resolve, owner }));
+  return { emit, waitForTurnEndFor };
 }
 
 const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
@@ -110,6 +126,10 @@ if (isEntrypoint) {
   let manager: ReturnType<typeof createSessionManager> | null = null;
   let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
   let activeExecutor: ReturnType<typeof createWorkflowExecutor> | null = null;
+  // Jeton d'identité du workflow actif : distinct de `activeExecutor` pour que
+  // `creerAttenteDeTour` (défini plus bas, avant que `manager`/`waitForTurnEndFor` existent) et
+  // `emitCheckpoint` puissent tous deux filtrer sur la même valeur simplement comparable.
+  let activeOwner: object | null = null;
 
   const workflowsDir = join(process.cwd(), '.claude-dashboard', 'workflows');
   const promptsDir = join(process.cwd(), '.claude-dashboard', 'prompts');
@@ -178,13 +198,20 @@ if (isEntrypoint) {
           // Un seul workflow actif à la fois : un nouveau `workflow.start` reçu pendant qu'un
           // autre tourne remplace l'exécuteur précédent (décision documentée dans le rapport de
           // la feature 06 — pas de file d'attente, pas d'erreur, le plus simple des deux options).
-          activeExecutor = createWorkflowExecutor({
+          // Chaque exécuteur reçoit son PROPRE jeton `owner` (round 1 de revue) : `waitForTurnEnd`
+          // et `emitCheckpoint` de l'ancien exécuteur ne réagissent plus jamais une fois remplacé.
+          const owner = {};
+          const nouvelExecuteur = createWorkflowExecutor({
             applyRuntime: manager.applyRuntime,
             send: manager.send,
-            waitForTurnEnd,
-            emitCheckpoint: (checkpoint) => server.broadcast({ type: 'workflow.checkpoint', checkpoint }),
+            waitForTurnEnd: waitForTurnEndFor(owner),
+            emitCheckpoint: (checkpoint) => {
+              if (activeOwner === owner) server.broadcast({ type: 'workflow.checkpoint', checkpoint });
+            },
           });
-          void activeExecutor.start(workflow);
+          activeExecutor = nouvelExecuteur;
+          activeOwner = owner;
+          void nouvelExecuteur.start(workflow);
         });
       }
       if (cmd.type === 'workflow.resume') {
@@ -227,7 +254,7 @@ if (isEntrypoint) {
   });
 
   const store = await createPermissionStore(process.cwd());
-  const { emit, waitForTurnEnd } = creerAttenteDeTour((event) => server.broadcast(event));
+  const { emit, waitForTurnEndFor } = creerAttenteDeTour((event) => server.broadcast(event), () => activeOwner);
 
   manager = createSessionManager({
     cwd: process.cwd(),
