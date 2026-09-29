@@ -1,6 +1,7 @@
 import { test, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { Sidebar } from './Sidebar.tsx';
+import type { PromptDefinition } from '../../../server/protocol.ts';
 
 beforeEach(() => {
   localStorage.clear();
@@ -14,6 +15,11 @@ const base = {
   availableCommands: [{ name: 'commit', description: 'ecrit un commit' }],
   mcpServers: [{ name: 'linear', status: 'connected', toolCount: 3 }],
   availableAgents: [{ name: 'Explore', description: 'recherche en lecture seule' }],
+  prompts: [] as PromptDefinition[],
+  onLaunchPrompt: () => {},
+  onSavePrompt: () => {},
+  onDeletePrompt: () => {},
+  onTogglePinPrompt: () => {},
 };
 
 test('trois icones selectionnent la colonne', () => {
@@ -72,4 +78,46 @@ test('colonne lancer : les subagents sont listes et le fan-out est desactive', (
   expect(screen.getByText('Explore')).toBeTruthy();
   expect(screen.getByText(/fan-out/i)).toBeTruthy();
   expect(screen.getByText(/désactiv|desactiv/i)).toBeTruthy();
+});
+
+test('colonne lancer : la section prompts affiche la bibliotheque de prompts', () => {
+  const launched: PromptDefinition[] = [];
+  render(
+    <Sidebar
+      {...base}
+      column="lancer"
+      prompts={[{ id: 'p1', name: 'Mon prompt', text: 'Fais X', pinned: false }]}
+      onLaunchPrompt={(p) => launched.push(p)}
+    />
+  );
+
+  expect(screen.getByDisplayValue('Mon prompt')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /^lancer$/i }));
+  expect(launched).toEqual([{ id: 'p1', name: 'Mon prompt', text: 'Fais X', pinned: false }]);
+});
+
+test('colonne accueil, section favoris : liste les prompts epingles en lecture seule avec un bouton lancer', () => {
+  const launched: PromptDefinition[] = [];
+  render(
+    <Sidebar
+      {...base}
+      prompts={[
+        { id: 'p1', name: 'Prompt epingle', text: 'X', pinned: true },
+        { id: 'p2', name: 'Prompt normal', text: 'Y', pinned: false },
+      ]}
+      onLaunchPrompt={(p) => launched.push(p)}
+    />
+  );
+
+  expect(screen.getByText('Prompt epingle')).toBeTruthy();
+  expect(screen.queryByText('Prompt normal')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: /^lancer$/i }));
+  expect(launched).toEqual([{ id: 'p1', name: 'Prompt epingle', text: 'X', pinned: true }]);
+});
+
+test('colonne accueil, section favoris : aucun favori epingle garde le texte Aucun favori', () => {
+  render(<Sidebar {...base} prompts={[{ id: 'p1', name: 'Prompt normal', text: 'Y', pinned: false }]} />);
+
+  expect(screen.getByText('Aucun favori')).toBeTruthy();
 });

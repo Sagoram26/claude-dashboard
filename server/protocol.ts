@@ -115,6 +115,13 @@ export type WorkflowDefinition = {
   steps: WorkflowStep[];
 };
 
+export type PromptDefinition = {
+  id: string;
+  name: string;
+  text: string;
+  pinned: boolean;
+};
+
 export type ChangedFile = { path: string; added: number; removed: number };
 
 export type GitState = { branch: string; dirty: number; staged: number };
