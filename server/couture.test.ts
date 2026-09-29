@@ -291,22 +291,77 @@ function queryQuiRepondAChaqueTour() {
 }
 
 /**
+ * Un `query` entièrement piloté par le test : chaque tour reste bloqué tant que
+ * `repondreAuProchainTour()` n'a pas été appelé explicitement. Sert à contrôler l'ordre exact des
+ * événements dans le test de remplacement d'exécuteur (round 1 de revue), où le timing réel du
+ * double auto-répondant serait une course non déterministe.
+ */
+function queryPilotee() {
+  const enAttente: Array<() => void> = [];
+  const query = ({ prompt }: { prompt: unknown; options: Record<string, unknown> }) => {
+    const generator = (async function* () {
+      let compteur = 0;
+      for await (const _ of prompt as AsyncIterable<unknown>) {
+        compteur += 1;
+        await new Promise<void>((resolve) => enAttente.push(resolve));
+        yield {
+          type: 'assistant',
+          message: { id: `msg_${compteur}`, content: [{ type: 'text', text: 'fait' }] },
+          uuid: `m${compteur}`,
+          session_id: 's1',
+        };
+        yield { type: 'result', subtype: 'success', total_cost_usd: 0.01, session_id: 's1', uuid: `r${compteur}` };
+      }
+    })();
+
+    return Object.assign(generator, {
+      interrupt: async () => undefined,
+      setModel: async () => {},
+      setPermissionMode: async () => {},
+      applyFlagSettings: async () => {},
+      supportedModels: async () => [],
+      getContextUsage: async () => ({ totalTokens: 0, maxTokens: 0, percentage: 0, categories: [] }),
+    });
+  };
+
+  return {
+    query,
+    repondreAuProchainTour: () => {
+      const resolve = enAttente.shift();
+      if (resolve) resolve();
+    },
+  };
+}
+
+/**
  * Enveloppe `emit` pour construire `waitForTurnEnd()` sans toucher à `SessionManager` : broadcast
  * l'événement normalement, et résout les attentes en cours quand le statut repasse à `'idle'`.
  * Même motif que `server/index.ts` §2 du brief, dupliqué ici car non exporté par `createServer`.
+ *
+ * Correctif round 1 de revue : chaque attente est désormais taguée par un jeton `owner` propre à
+ * l'exécuteur qui l'a enregistrée. Au passage à `'idle'`, seuls les résolveurs dont le jeton
+ * correspond encore au propriétaire courant (`getActiveOwner()`) sont débloqués — les résolveurs
+ * d'un exécuteur remplacé par un `workflow.start` plus récent ne sont jamais résolus : cet
+ * exécuteur reste bloqué indéfiniment sur son étape en cours, sans jamais émettre de nouveau
+ * checkpoint ni relancer `manager.send`. C'est un abandon silencieux et documenté, pas une
+ * annulation active de l'appel SDK en cours (`executor.ts` n'est pas modifié).
  */
-function creerAttenteDeTour(broadcast: (e: ServerEvent) => void) {
-  let waiters: Array<() => void> = [];
+function creerAttenteDeTour(broadcast: (e: ServerEvent) => void, getActiveOwner: () => unknown) {
+  let waiters: Array<{ resolve: () => void; owner: unknown }> = [];
   const emit = (event: ServerEvent) => {
     broadcast(event);
     if (event.type === 'session.state' && event.state.status === 'idle') {
       const toWake = waiters;
       waiters = [];
-      for (const w of toWake) w();
+      const active = getActiveOwner();
+      for (const w of toWake) {
+        if (w.owner === active) w.resolve();
+      }
     }
   };
-  const waitForTurnEnd = () => new Promise<void>((resolve) => waiters.push(resolve));
-  return { emit, waitForTurnEnd };
+  const waitForTurnEndFor = (owner: unknown) => () =>
+    new Promise<void>((resolve) => waiters.push({ resolve, owner }));
+  return { emit, waitForTurnEndFor };
 }
 
 /**
@@ -336,7 +391,10 @@ async function monterCoutureWorkflow() {
     },
   });
 
-  const { emit, waitForTurnEnd } = creerAttenteDeTour((e) => server.broadcast(e));
+  // Un seul exécuteur vit sur toute la durée de ce montage : le jeton `owner` est fixe, la
+  // logique de filtrage de `creerAttenteDeTour` ne change donc rien au comportement de ces tests.
+  const owner = {};
+  const { emit, waitForTurnEndFor } = creerAttenteDeTour((e) => server.broadcast(e), () => owner);
 
   manager = createSessionManager({
     cwd: process.cwd(),
@@ -347,7 +405,7 @@ async function monterCoutureWorkflow() {
   executor = createWorkflowExecutor({
     applyRuntime: manager.applyRuntime,
     send: manager.send,
-    waitForTurnEnd,
+    waitForTurnEnd: waitForTurnEndFor(owner),
     emitCheckpoint: (checkpoint) => server.broadcast({ type: 'workflow.checkpoint', checkpoint }),
   });
 
@@ -370,10 +428,26 @@ async function monterCoutureWorkflow() {
     state: () => state,
     fermer: async () => {
       socket.close();
-      await manager?.stop();
+      await arreterAvecGarantie(manager);
       await server.close();
     },
   };
+}
+
+/**
+ * `manager.stop()` attend la fin de la boucle `pump`, elle-même suspendue tant que le générateur
+ * SDK n'a pas rendu la main. Un exécuteur de workflow abandonné (round 1 de revue) peut laisser un
+ * `waitForTurnEnd()` — ou, avec un double piloté, une porte — jamais résolu : sans garde-fou, le
+ * nettoyage du test hérite de ce blocage et ne rend jamais la main, gelant toute la suite (vécu en
+ * pratique pendant l'écriture du test de reproduction ci-dessous). Même motif que les
+ * `Promise.race(..., 'canUseTool jamais resolu')` déjà présents plus haut dans ce fichier.
+ */
+async function arreterAvecGarantie(manager: { stop: () => Promise<void> } | null): Promise<void> {
+  if (!manager) return;
+  await Promise.race([
+    manager.stop(),
+    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+  ]);
 }
 
 function checkpointIds(state: AppState): string[] {
@@ -485,6 +559,120 @@ test('workflow.resume avec action correct suspend le workflow sans jamais lancer
   assert.equal(checkpointIds(state()).some((id) => id.startsWith('s2-')), false);
   } finally {
     await fermer();
+  }
+});
+
+/**
+ * Round 1 de revue de la feature 06 : un `workflow.start` reçu pendant qu'un workflow tourne déjà
+ * doit remplacer l'exécuteur SANS que l'ancien continue à produire des checkpoints en arrière-plan
+ * ni à entrelacer ses appels SDK avec ceux du nouveau. Montage dédié qui reproduit exactement le
+ * câblage de `server/index.ts` (owner token par exécuteur, `emitCheckpoint` gardé par
+ * `activeOwner`), avec un double SDK entièrement piloté (`queryPilotee`) pour contrôler l'instant
+ * exact du remplacement sans dépendre du timing réel du double auto-répondant.
+ */
+test('un workflow.start recu pendant qu un workflow tourne deja remplace l executeur et arrete les checkpoints de l ancien', async () => {
+  const { query, repondreAuProchainTour } = queryPilotee();
+
+  const workflows: Record<string, WorkflowDefinition> = {
+    wfA: {
+      id: 'wfA',
+      name: 'Workflow A',
+      steps: [
+        { id: 'a1', label: 'A1', prompt: 'a1', gate: false },
+        { id: 'a2', label: 'A2', prompt: 'a2', gate: false },
+      ],
+    },
+    wfB: {
+      id: 'wfB',
+      name: 'Workflow B',
+      steps: [{ id: 'b1', label: 'B1', prompt: 'b1', gate: false }],
+    },
+  };
+
+  let manager: ReturnType<typeof createSessionManager> | null = null;
+  let activeOwner: object | null = null;
+  let waitForTurnEndFor!: (owner: unknown) => () => Promise<void>;
+
+  const server = await createServer(0, {
+    onConnect: (send) => {
+      if (manager) send({ type: 'session.state', state: manager.state() });
+    },
+    onCommand: (cmd) => {
+      if (!manager) return;
+      if (cmd.type === 'workflow.start') {
+        const workflow = workflows[cmd.workflowId];
+        if (!workflow) return;
+        // Meme motif que server/index.ts §2 (corrige) : un jeton `owner` propre a CET exécuteur,
+        // jamais une closure emit/waitForTurnEnd partagee entre exécuteurs successifs.
+        const owner = {};
+        const nouvelExecuteur = createWorkflowExecutor({
+          applyRuntime: manager.applyRuntime,
+          send: manager.send,
+          waitForTurnEnd: waitForTurnEndFor(owner),
+          emitCheckpoint: (checkpoint) => {
+            if (activeOwner === owner) server.broadcast({ type: 'workflow.checkpoint', checkpoint });
+          },
+        });
+        activeOwner = owner;
+        void nouvelExecuteur.start(workflow);
+      }
+    },
+  });
+
+  const attente = creerAttenteDeTour((e) => server.broadcast(e), () => activeOwner);
+  waitForTurnEndFor = attente.waitForTurnEndFor;
+
+  manager = createSessionManager({
+    cwd: process.cwd(),
+    emit: attente.emit,
+    queryFn: query as never,
+  });
+
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+  let state: AppState = initialState;
+  socket.on('message', (raw) => {
+    state = reduceEvent(state, JSON.parse(raw.toString()) as ServerEvent);
+  });
+  await new Promise((resolve) => socket.on('open', resolve));
+
+  try {
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'wfA' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // A a demarre (checkpoint running emis synchroniquement par l'executeur), mais son premier
+    // tour reste bloque : queryPilotee n'a encore rien debloque.
+    assert.deepEqual(checkpointIds(state), ['a1-running']);
+
+    // B remplace A avant que le tour de A ne se termine.
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'wfB' }));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(checkpointIds(state), ['a1-running', 'b1-running']);
+
+    // Debloque le tour de A (deja en file dans le double pilote) : son idle est ignore car son
+    // owner n'est plus l'owner actif, l'exécuteur A reste bloque sur waitForTurnEnd() a jamais.
+    repondreAuProchainTour();
+    // Le tour de B n'entre dans la file du double pilote qu'une fois que le generateur a fini de
+    // traiter le tour de A (il ne traite qu'un message a la fois) : il faut laisser cette chaine
+    // de microtaches se derouler avant de pouvoir debloquer le tour de B a son tour.
+    await new Promise((r) => setTimeout(r, 50));
+    repondreAuProchainTour();
+    await new Promise((r) => setTimeout(r, 200));
+
+    const ids = checkpointIds(state);
+    assert.deepEqual(
+      ids,
+      ['a1-running', 'b1-running', 'b1-done'],
+      'les checkpoints de A abandonne ne doivent plus jamais apparaitre apres son remplacement par B'
+    );
+    assert.equal(
+      ids.some((id) => id.startsWith('a2-')),
+      false,
+      'l etape 2 du workflow abandonne A ne doit jamais demarrer'
+    );
+  } finally {
+    socket.close();
+    await arreterAvecGarantie(manager);
+    await server.close();
   }
 });
 
