@@ -1,8 +1,9 @@
 import { createServer as createHttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseClientCommand, type ClientCommand, type ServerEvent, type WorkflowDefinition, type PromptDefinition } from './protocol.ts';
+import { parseClientCommand, type ClientCommand, type ServerEvent } from './protocol.ts';
 import type { RecentSession } from './session/recent.ts';
+import { createWorkflowController, creerAttenteDeTour } from './workflows/wiring.ts';
 
 export type ServerHandlers = {
   onCommand?: (cmd: ClientCommand, send: (event: ServerEvent) => void) => void;
@@ -75,66 +76,32 @@ export async function createServer(
   };
 }
 
-/**
- * Enveloppe `emit` pour construire `waitForTurnEnd()` sans toucher à la signature publique de
- * `SessionManager` (déjà testée par `manager.test.ts`) : broadcast l'événement normalement, et
- * résout les attentes en cours quand le statut repasse à `'idle'`. Motif classique (liste de
- * résolveurs vidée à chaque passage), utilitaire local, pas de module séparé pour si peu.
- *
- * Correctif round 1 de revue de la feature 06 : chaque attente est taguée par un jeton `owner`
- * propre à l'exécuteur qui l'a enregistrée (voir `workflow.start` plus bas). Au passage à
- * `'idle'`, seuls les résolveurs dont le jeton correspond encore au propriétaire courant
- * (`getActiveOwner()`) sont débloqués. Sans ce filtrage, un `workflow.start` qui remplace
- * `activeExecutor` pendant qu'un workflow tourne déjà laissait l'ancien exécuteur partager la
- * même closure `waiters`/`manager.send` que le nouveau : au prochain `'idle'`, l'ancien reprenait
- * sa propre séquence EN PARALLÈLE du nouveau, entrelaçant deux `manager.send()` dans la même
- * session et diffusant les checkpoints des deux workflows sans distinction. Ici, un exécuteur
- * remplacé reste bloqué indéfiniment sur son `waitForTurnEnd()` en cours — un abandon silencieux,
- * pas une annulation active de l'appel SDK — et son `emitCheckpoint` (ci-dessous) est lui aussi
- * gardé par le même jeton pour ne jamais diffuser les checkpoints d'un exécuteur abandonné.
- */
-function creerAttenteDeTour(broadcast: (e: ServerEvent) => void, getActiveOwner: () => unknown) {
-  let waiters: Array<{ resolve: () => void; owner: unknown }> = [];
-  const emit = (event: ServerEvent) => {
-    broadcast(event);
-    if (event.type === 'session.state' && event.state.status === 'idle') {
-      const toWake = waiters;
-      waiters = [];
-      const active = getActiveOwner();
-      for (const w of toWake) {
-        if (w.owner === active) w.resolve();
-      }
-    }
-  };
-  const waitForTurnEndFor = (owner: unknown) => () =>
-    new Promise<void>((resolve) => waiters.push({ resolve, owner }));
-  return { emit, waitForTurnEndFor };
-}
-
 const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
 if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
   const { createPermissionStore } = await import('./session/permission-store.ts');
   const { createGitWatcher } = await import('./session/git-watcher.ts');
   const { listRecentSessions } = await import('./session/recent.ts');
-  const { listWorkflows, loadWorkflow, saveWorkflow, deleteWorkflow } = await import('./workflows/store.ts');
-  const { listPrompts, savePrompt, deletePrompt } = await import('./prompts/store.ts');
-  const { createWorkflowExecutor } = await import('./workflows/executor.ts');
   const { homedir } = await import('node:os');
   const { join } = await import('node:path');
 
+  // I7 : filet de securite global. Les chaines de promesse connues (workflow.*/prompt.*) ont deja
+  // leur .catch() explicite (voir server/workflows/wiring.ts, qui broadcast une erreur au client) ;
+  // ce gestionnaire est le dernier recours pour toute autre promesse rejetee non capturee, qui
+  // ferait sinon tomber tout le process Node.
+  process.on('unhandledRejection', (err) => {
+    console.error('unhandledRejection', err);
+  });
+
   let manager: ReturnType<typeof createSessionManager> | null = null;
   let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
-  let activeExecutor: ReturnType<typeof createWorkflowExecutor> | null = null;
-  // Jeton d'identité du workflow actif : distinct de `activeExecutor` pour que
-  // `creerAttenteDeTour` (défini plus bas, avant que `manager`/`waitForTurnEndFor` existent) et
-  // `emitCheckpoint` puissent tous deux filtrer sur la même valeur simplement comparable.
-  let activeOwner: object | null = null;
+  // Assigne apres la creation de `server` (le controleur a besoin de `server.broadcast`) mais
+  // referme sur `workflowController` dans les callbacks `onConnect`/`onCommand` plus bas, invoques
+  // seulement apres l'assignation reelle : meme motif que `waitForTurnEndFor` ci-dessous.
+  let workflowController!: ReturnType<typeof createWorkflowController>;
 
   const workflowsDir = join(process.cwd(), '.claude-dashboard', 'workflows');
   const promptsDir = join(process.cwd(), '.claude-dashboard', 'prompts');
-  let workflows: WorkflowDefinition[] = await listWorkflows(workflowsDir);
-  let prompts: PromptDefinition[] = await listPrompts(promptsDir);
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
     listSessions: async () => {
@@ -159,65 +126,10 @@ if (isEntrypoint) {
         send({ type: 'git.state', git: snapshot.git });
         send({ type: 'files.changed', files: snapshot.files });
       }
-      send({ type: 'workflows.list', workflows });
-      send({ type: 'prompts.list', prompts });
+      workflowController.onConnect(send);
     },
     onCommand: (cmd) => {
-      if (cmd.type === 'workflow.save') {
-        void saveWorkflow(workflowsDir, cmd.workflow).then(async () => {
-          workflows = await listWorkflows(workflowsDir);
-          server.broadcast({ type: 'workflows.list', workflows });
-        });
-      }
-      if (cmd.type === 'workflow.delete') {
-        void deleteWorkflow(workflowsDir, cmd.id).then(async () => {
-          workflows = await listWorkflows(workflowsDir);
-          server.broadcast({ type: 'workflows.list', workflows });
-        });
-      }
-      if (cmd.type === 'prompt.save') {
-        void savePrompt(promptsDir, cmd.prompt).then(async () => {
-          prompts = await listPrompts(promptsDir);
-          server.broadcast({ type: 'prompts.list', prompts });
-        });
-      }
-      if (cmd.type === 'prompt.delete') {
-        void deletePrompt(promptsDir, cmd.id).then(async () => {
-          prompts = await listPrompts(promptsDir);
-          server.broadcast({ type: 'prompts.list', prompts });
-        });
-      }
-      if (cmd.type === 'workflow.start') {
-        if (!manager) return;
-        void loadWorkflow(workflowsDir, cmd.workflowId).then((workflow) => {
-          if (!workflow) {
-            server.broadcast({ type: 'error', message: `Workflow introuvable : ${cmd.workflowId}` });
-            return;
-          }
-          if (!manager) return;
-          // Un seul workflow actif à la fois : un nouveau `workflow.start` reçu pendant qu'un
-          // autre tourne remplace l'exécuteur précédent (décision documentée dans le rapport de
-          // la feature 06 — pas de file d'attente, pas d'erreur, le plus simple des deux options).
-          // Chaque exécuteur reçoit son PROPRE jeton `owner` (round 1 de revue) : `waitForTurnEnd`
-          // et `emitCheckpoint` de l'ancien exécuteur ne réagissent plus jamais une fois remplacé.
-          const owner = {};
-          const nouvelExecuteur = createWorkflowExecutor({
-            applyRuntime: manager.applyRuntime,
-            send: manager.send,
-            waitForTurnEnd: waitForTurnEndFor(owner),
-            emitCheckpoint: (checkpoint) => {
-              if (activeOwner === owner) server.broadcast({ type: 'workflow.checkpoint', checkpoint });
-            },
-          });
-          activeExecutor = nouvelExecuteur;
-          activeOwner = owner;
-          void nouvelExecuteur.start(workflow);
-        });
-      }
-      if (cmd.type === 'workflow.resume') {
-        if (cmd.action === 'continue') void activeExecutor?.continueAfterGate();
-        if (cmd.action === 'correct') activeExecutor?.correctAtGate();
-      }
+      workflowController.onCommand(cmd);
       if (!manager) return;
       if (cmd.type === 'message.send') manager.send(cmd.text);
       if (cmd.type === 'session.interrupt') {
@@ -254,7 +166,19 @@ if (isEntrypoint) {
   });
 
   const store = await createPermissionStore(process.cwd());
-  const { emit, waitForTurnEndFor } = creerAttenteDeTour((event) => server.broadcast(event), () => activeOwner);
+  const { emit, waitForTurnEndFor } = creerAttenteDeTour(
+    (event) => server.broadcast(event),
+    () => workflowController.getActiveOwner()
+  );
+
+  workflowController = createWorkflowController({
+    workflowsDir,
+    promptsDir,
+    getManager: () => manager,
+    broadcast: (event) => server.broadcast(event),
+    waitForTurnEndFor,
+  });
+  await workflowController.loadInitialLists();
 
   manager = createSessionManager({
     cwd: process.cwd(),
