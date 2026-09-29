@@ -162,7 +162,7 @@ test('une étape sans model/permissionMode/subagent ne passe pas ces clés à ap
   await started;
 
   assert.equal(f.applyRuntimeCalls.length, 1);
-  const call = f.applyRuntimeCalls[0];
+  const call = f.applyRuntimeCalls[0]!;
   assert.equal('model' in call, false);
   assert.equal('permissionMode' in call, false);
 });
