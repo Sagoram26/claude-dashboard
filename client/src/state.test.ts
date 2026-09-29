@@ -244,3 +244,88 @@ test('files.changed remplace la liste des fichiers modifies', () => {
 
   expect(state.changedFiles).toEqual(files);
 });
+
+const checkpoint = (over: Partial<import('../../server/protocol.ts').WorkflowCheckpoint> = {}) => ({
+  id: 's1',
+  label: 'Étape 1',
+  status: 'running' as const,
+  stepIndex: 0,
+  totalSteps: 2,
+  ...over,
+});
+
+test('workflow.checkpoint ajoute toujours une nouvelle entree au fil, jamais une mise a jour', () => {
+  let state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running' }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'done', durationMs: 1200 }),
+  });
+
+  expect(state.thread).toHaveLength(2);
+  expect(state.thread.map((e) => e.kind)).toEqual(['checkpoint', 'checkpoint']);
+  expect(state.thread[0]).toEqual({
+    kind: 'checkpoint',
+    id: 's1-running',
+    checkpoint: checkpoint({ status: 'running' }),
+  });
+  expect(state.thread[1]).toEqual({
+    kind: 'checkpoint',
+    id: 's1-done',
+    checkpoint: checkpoint({ status: 'done', durationMs: 1200 }),
+  });
+});
+
+test('workflow.checkpoint running pose currentWorkflowStep', () => {
+  const state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running', stepIndex: 1, totalSteps: 3, label: 'Étape 2' }),
+  });
+
+  expect(state.currentWorkflowStep).toEqual({ index: 1, total: 3, label: 'Étape 2' });
+});
+
+test('workflow.checkpoint gate conserve currentWorkflowStep tel quel', () => {
+  let state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running', stepIndex: 1, totalSteps: 3, label: 'Étape 2' }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'done', stepIndex: 1, totalSteps: 3, label: 'Étape 2' }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'gate', stepIndex: 1, totalSteps: 3, label: 'Étape 2' }),
+  });
+
+  expect(state.currentWorkflowStep).toEqual({ index: 1, total: 3, label: 'Étape 2' });
+});
+
+test('le dernier done sans etape suivante remet currentWorkflowStep a null', () => {
+  let state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running', stepIndex: 1, totalSteps: 2, label: 'Étape 2' }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'done', stepIndex: 1, totalSteps: 2, label: 'Étape 2' }),
+  });
+
+  expect(state.currentWorkflowStep).toBeNull();
+});
+
+test('un done qui n est pas la derniere etape ne remet pas currentWorkflowStep a null', () => {
+  let state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running', stepIndex: 0, totalSteps: 2, label: 'Étape 1' }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'done', stepIndex: 0, totalSteps: 2, label: 'Étape 1' }),
+  });
+
+  expect(state.currentWorkflowStep).toEqual({ index: 0, total: 2, label: 'Étape 1' });
+});

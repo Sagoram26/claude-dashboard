@@ -65,6 +65,10 @@ test('start() enchaîne 3 étapes sans barrière jusqu\'à done', async () => {
     f.checkpoints.map((c) => `${c.id}:${c.status}`),
     ['s1:running', 's1:done', 's2:running', 's2:done', 's3:running', 's3:done']
   );
+  assert.deepEqual(
+    f.checkpoints.map((c) => `${c.stepIndex}/${c.totalSteps}`),
+    ['0/3', '0/3', '1/3', '1/3', '2/3', '2/3']
+  );
   assert.equal(executor.state()?.status, 'done');
 });
 
@@ -86,7 +90,17 @@ test('start() s\'arrête sur la barrière de l\'étape 2 (index 1)', async () =>
 
   assert.equal(f.applyRuntimeCalls.length, 2);
   assert.equal(f.sendCalls.length, 2);
-  assert.equal(f.checkpoints.length, 4);
+  assert.equal(f.checkpoints.length, 5);
+  assert.deepEqual(
+    f.checkpoints.map((c) => `${c.id}:${c.status}`),
+    ['s1:running', 's1:done', 's2:running', 's2:done', 's2:gate']
+  );
+  assert.deepEqual(
+    f.checkpoints.map((c) => `${c.stepIndex}/${c.totalSteps}`),
+    ['0/3', '0/3', '1/3', '1/3', '1/3']
+  );
+  const gateCheckpoint = f.checkpoints[4]!;
+  assert.equal('durationMs' in gateCheckpoint, false);
   assert.equal(executor.state()?.status, 'gated');
   assert.equal(executor.state()?.currentStepIndex, 1);
 });
@@ -115,6 +129,10 @@ test('continueAfterGate() reprend à l\'étape 3 et termine', async () => {
   assert.equal(f.applyRuntimeCalls.length, 3);
   assert.equal(f.sendCalls.length, 3);
   assert.deepEqual(f.sendCalls, ['p1', 'p2', 'p3']);
+  assert.deepEqual(
+    f.checkpoints.map((c) => `${c.id}:${c.status}`),
+    ['s1:running', 's1:done', 's2:running', 's2:done', 's2:gate', 's3:running', 's3:done']
+  );
   assert.equal(executor.state()?.status, 'done');
 });
 
@@ -133,6 +151,10 @@ test('correctAtGate() ne relance rien et laisse l\'état gated', async () => {
 
   assert.equal(f.applyRuntimeCalls.length, 1);
   assert.equal(f.sendCalls.length, 1);
+  assert.deepEqual(
+    f.checkpoints.map((c) => `${c.id}:${c.status}`),
+    ['s1:running', 's1:done', 's1:gate']
+  );
 
   executor.correctAtGate();
 
@@ -201,5 +223,50 @@ test('checkpoint running est émis avant send, done après waitForTurnEnd résol
     'waitForTurnEnd:start',
     'waitForTurnEnd:end',
     'checkpoint:done',
+  ]);
+});
+
+test('le checkpoint gate est émis juste après le done de l\'étape barrée, avant toute étape suivante', async () => {
+  const f = fakeDeps();
+  const events: string[] = [];
+  const originalSend = f.deps.send;
+  f.deps.send = (text: string) => {
+    events.push(`send:${text}`);
+    originalSend(text);
+  };
+  f.deps.emitCheckpoint = (checkpoint: WorkflowCheckpoint) => {
+    events.push(`checkpoint:${checkpoint.id}:${checkpoint.status}`);
+    f.checkpoints.push(checkpoint);
+  };
+
+  const executor = createWorkflowExecutor(f.deps);
+  const wf = workflow([
+    { id: 's1', label: 'Étape 1', prompt: 'p1', gate: true },
+    { id: 's2', label: 'Étape 2', prompt: 'p2', gate: false },
+  ]);
+
+  const started = executor.start(wf);
+  await new Promise((r) => setImmediate(r));
+  f.resolveTurn();
+  await started;
+
+  // start() résout sur l'état gated : seule l'étape 1 a tourné, le checkpoint gate est déjà
+  // là, et rien de l'étape 2 n'a encore commencé.
+  assert.deepEqual(events, ['checkpoint:s1:running', 'send:p1', 'checkpoint:s1:done', 'checkpoint:s1:gate']);
+  assert.equal(executor.state()?.status, 'gated');
+
+  const resumed = executor.continueAfterGate();
+  await new Promise((r) => setImmediate(r));
+  f.resolveTurn();
+  await resumed;
+
+  assert.deepEqual(events, [
+    'checkpoint:s1:running',
+    'send:p1',
+    'checkpoint:s1:done',
+    'checkpoint:s1:gate',
+    'checkpoint:s2:running',
+    'send:p2',
+    'checkpoint:s2:done',
   ]);
 });
