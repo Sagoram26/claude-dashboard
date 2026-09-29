@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { ChangedFile } from '../../../server/protocol.ts';
+import type { ChangedFile, PromptDefinition } from '../../../server/protocol.ts';
+import { PromptLibrary } from './PromptLibrary.tsx';
 
 export type SidebarColumn = 'accueil' | 'skills' | 'lancer';
 
@@ -11,6 +12,11 @@ export type SidebarProps = {
   availableCommands: { name: string; description: string }[];
   availableAgents: { name: string; description: string }[];
   mcpServers: { name: string; status: string; toolCount: number; error?: string }[];
+  prompts: PromptDefinition[];
+  onLaunchPrompt: (prompt: PromptDefinition) => void;
+  onSavePrompt: (prompt: PromptDefinition) => void;
+  onDeletePrompt: (id: string) => void;
+  onTogglePinPrompt: (id: string) => void;
 };
 
 function useCollapsed(id: string, defaultCollapsed: boolean) {
@@ -123,7 +129,20 @@ export function Sidebar(props: SidebarProps) {
             )}
           </Section>
           <Section id="favoris" title="Favoris" defaultCollapsed={false}>
-            <div style={{ color: 'var(--text-faint)' }}>Aucun favori</div>
+            {props.prompts.filter((p) => p.pinned).length === 0 ? (
+              <div style={{ color: 'var(--text-faint)' }}>Aucun favori</div>
+            ) : (
+              props.prompts
+                .filter((p) => p.pinned)
+                .map((p) => (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{p.name}</span>
+                    <button type="button" className="pill" onClick={() => props.onLaunchPrompt(p)}>
+                      Lancer
+                    </button>
+                  </div>
+                ))
+            )}
           </Section>
           <Section
             id="activite"
@@ -172,7 +191,13 @@ export function Sidebar(props: SidebarProps) {
       {props.column === 'lancer' && (
         <>
           <Section id="prompts" title="Prompts" defaultCollapsed={false}>
-            <div style={{ color: 'var(--text-faint)' }}>Bibliothèque de prompts — à venir</div>
+            <PromptLibrary
+              prompts={props.prompts}
+              onLaunch={props.onLaunchPrompt}
+              onSave={props.onSavePrompt}
+              onDelete={props.onDeletePrompt}
+              onTogglePin={props.onTogglePinPrompt}
+            />
           </Section>
           <Section id="subagents" title="Subagents" defaultCollapsed={false}>
             {props.availableAgents.map((a) => (

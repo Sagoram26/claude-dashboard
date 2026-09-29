@@ -89,6 +89,11 @@ export function Session() {
           availableCommands={state.availableCommands}
           availableAgents={state.availableAgents}
           mcpServers={state.mcpServers}
+          prompts={[]}
+          onLaunchPrompt={() => {}}
+          onSavePrompt={() => {}}
+          onDeletePrompt={() => {}}
+          onTogglePinPrompt={() => {}}
         />
         <main role="main" style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
         {screen === 'settings' ? (
