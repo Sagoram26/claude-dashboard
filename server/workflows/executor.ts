@@ -26,6 +26,12 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
   }
 
   async function runStep(step: WorkflowStep, index: number): Promise<void> {
+    // B2 : pose l'etat a 'running' des l'entree, synchroniquement, avant le premier `await`. Sans
+    // cela, internalState restait a 'gated' pendant toute la duree de l'etape suivante (jusqu'a sa
+    // propre barriere ou jusqu'a 'done'), et un second continueAfterGate() (double-clic, vieux
+    // bouton reste affiche) repassait le test `status !== 'gated'` et relancait runFrom() une
+    // deuxieme fois EN PARALLELE — prompts et checkpoints en double.
+    internalState = { workflowId: workflow!.id, currentStepIndex: index, status: 'running' };
     const totalSteps = workflow!.steps.length;
     const startedAt = Date.now();
     deps.emitCheckpoint({
