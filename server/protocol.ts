@@ -139,6 +139,15 @@ export type ContextUsage = {
   categories: { name: string; tokens: number }[];
 };
 
+/**
+ * B4 (revue finale de branche tranche 4) : `id` (et `workflowId`/`checkpointId`) finit concatene
+ * tel quel dans un chemin de fichier cote serveur (`server/workflows/store.ts`,
+ * `server/prompts/store.ts` : `join(dir, \`${id}.json\`)`). Sans ce filtre, un id du style
+ * `../../.claude/settings` permettrait d'ecrire ou d'effacer un fichier arbitraire hors du dossier
+ * de stockage. Refuse tout ce qui n'est pas lettres/chiffres/tiret/underscore.
+ */
+const ID_SUR = /^[\w-]+$/;
+
 const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unknown>) => boolean> = {
   'message.send': (v) => typeof v.text === 'string' && v.text.length > 0,
   'session.interrupt': () => true,
@@ -150,21 +159,25 @@ const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unkno
     typeof v.requestId === 'string' &&
     (v.decision === 'allow' || v.decision === 'always' || v.decision === 'deny'),
   'permission.revoke': (v) => typeof v.toolName === 'string' && v.toolName.length > 0,
-  'workflow.start': (v) => typeof v.workflowId === 'string',
+  'workflow.start': (v) => typeof v.workflowId === 'string' && ID_SUR.test(v.workflowId),
   'workflow.resume': (v) =>
-    typeof v.checkpointId === 'string' && (v.action === 'continue' || v.action === 'correct'),
+    typeof v.checkpointId === 'string' &&
+    ID_SUR.test(v.checkpointId) &&
+    (v.action === 'continue' || v.action === 'correct'),
   'workflow.save': (v) =>
     typeof v.workflow === 'object' &&
     v.workflow !== null &&
     typeof (v.workflow as Record<string, unknown>).id === 'string' &&
+    ID_SUR.test((v.workflow as Record<string, unknown>).id as string) &&
     typeof (v.workflow as Record<string, unknown>).name === 'string',
-  'workflow.delete': (v) => typeof v.id === 'string',
+  'workflow.delete': (v) => typeof v.id === 'string' && ID_SUR.test(v.id),
   'prompt.save': (v) =>
     typeof v.prompt === 'object' &&
     v.prompt !== null &&
     typeof (v.prompt as Record<string, unknown>).id === 'string' &&
+    ID_SUR.test((v.prompt as Record<string, unknown>).id as string) &&
     typeof (v.prompt as Record<string, unknown>).name === 'string',
-  'prompt.delete': (v) => typeof v.id === 'string',
+  'prompt.delete': (v) => typeof v.id === 'string' && ID_SUR.test(v.id),
   'context.compact': () => true,
   'context.request-full': () => true,
 };
