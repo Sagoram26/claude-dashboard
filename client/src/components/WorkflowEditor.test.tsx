@@ -90,6 +90,25 @@ test('cocher la case barriere puis sauvegarder appelle onSave avec gate a true',
   expect(saved[0]?.steps[0]?.gate).toBe(true);
 });
 
+test('modifier le prompt d une etape puis sauvegarder appelle onSave avec le prompt attendu', () => {
+  const saved: WorkflowDefinition[] = [];
+  render(
+    <WorkflowEditor
+      workflows={[workflow()]}
+      availableModels={availableModels}
+      availableAgents={availableAgents}
+      onSave={(w) => saved.push(w)}
+      onDelete={() => {}}
+    />
+  );
+
+  fireEvent.change(screen.getByLabelText(/prompt/i), { target: { value: 'Fais Y a la place' } });
+  fireEvent.click(screen.getByRole('button', { name: /^enregistrer$/i }));
+
+  expect(saved).toHaveLength(1);
+  expect(saved[0]?.steps[0]?.prompt).toBe('Fais Y a la place');
+});
+
 test('supprimer un workflow appelle onDelete avec le bon id', () => {
   const deleted: string[] = [];
   render(
