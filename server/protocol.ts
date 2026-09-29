@@ -195,8 +195,9 @@ export function parseClientCommand(raw: string): ClientCommand | null {
   const type = candidate.type;
   if (typeof type !== 'string') return null;
 
+  if (!Object.hasOwn(COMMAND_VALIDATORS, type)) return null;
   const validate = COMMAND_VALIDATORS[type as ClientCommand['type']];
-  if (!validate || !validate(candidate)) return null;
+  if (!validate(candidate)) return null;
 
   return candidate as unknown as ClientCommand;
 }

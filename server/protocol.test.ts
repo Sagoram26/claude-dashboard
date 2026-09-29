@@ -19,6 +19,12 @@ test('rejette une commande au bon type mais mal formée', () => {
   assert.equal(parseClientCommand(JSON.stringify({ type: 'message.send' })), null);
 });
 
+test('un type qui vise le prototype d objet ne fait pas lever, rejette proprement', () => {
+  assert.equal(parseClientCommand(JSON.stringify({ type: '__proto__' })), null);
+  assert.equal(parseClientCommand(JSON.stringify({ type: 'hasOwnProperty' })), null);
+  assert.equal(parseClientCommand(JSON.stringify({ type: 'constructor' })), null);
+});
+
 test('workflow.resume avec action continue est accepte', () => {
   const cmd = parseClientCommand(
     JSON.stringify({ type: 'workflow.resume', checkpointId: 'c1', action: 'continue' })
