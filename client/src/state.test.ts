@@ -251,6 +251,7 @@ const checkpoint = (over: Partial<import('../../server/protocol.ts').WorkflowChe
   status: 'running' as const,
   stepIndex: 0,
   totalSteps: 2,
+  gate: false,
   ...over,
 });
 
@@ -328,4 +329,28 @@ test('un done qui n est pas la derniere etape ne remet pas currentWorkflowStep a
   });
 
   expect(state.currentWorkflowStep).toEqual({ index: 0, total: 2, label: 'Étape 1' });
+});
+
+test('le done de la derniere etape barree ne remet pas currentWorkflowStep a null (barriere en attente)', () => {
+  // Workflow de 2 étapes, la dernière (index 1) porte une barrière : la séquence reçue par le
+  // client est running(1) -> done(1, gate:true) -> gate(1). Le workflow n'est pas terminé, il est
+  // suspendu : le rappel d'étape doit rester affiché jusqu'à ce que 'continueAfterGate' relance
+  // une étape suivante (hors périmètre ici, aucune étape 3 n'existe).
+  let state = reduceEvent(initialState, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'running', stepIndex: 1, totalSteps: 2, label: 'Étape 2', gate: true }),
+  });
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'done', stepIndex: 1, totalSteps: 2, label: 'Étape 2', gate: true }),
+  });
+
+  expect(state.currentWorkflowStep).toEqual({ index: 1, total: 2, label: 'Étape 2' });
+
+  state = reduceEvent(state, {
+    type: 'workflow.checkpoint',
+    checkpoint: checkpoint({ status: 'gate', stepIndex: 1, totalSteps: 2, label: 'Étape 2', gate: true }),
+  });
+
+  expect(state.currentWorkflowStep).toEqual({ index: 1, total: 2, label: 'Étape 2' });
 });
