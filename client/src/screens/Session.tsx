@@ -55,6 +55,11 @@ export function Session() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <TopBar onOpenSettings={() => setScreen('settings')}>
+        {state.currentWorkflowStep !== null && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            ▸ étape {state.currentWorkflowStep.index + 1}/{state.currentWorkflowStep.total}
+          </span>
+        )}
         <ControlMenu
           label="Modèle"
           options={state.availableModels.map((m) => ({ value: m.value, label: m.displayName }))}
@@ -108,6 +113,10 @@ export function Session() {
               onDecide={(requestId, decision, reason) =>
                 connection.current?.send({ type: 'permission.respond', requestId, decision, reason })
               }
+              // TODO couture feature 06 : aucun ClientCommand pour la barrière n'existe encore
+              // côté protocole (workflow.resume ne couvre que la reprise, pas "corriger"). Câblage
+              // réel laissé à la feature qui introduira ce canal.
+              onWorkflowGateAction={() => {}}
             />
             {state.status === 'generating' && (
               <GeneratingIndicator

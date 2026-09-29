@@ -86,6 +86,8 @@ export type WorkflowCheckpoint = {
   status: 'done' | 'running' | 'gate';
   model?: string;
   durationMs?: number;
+  stepIndex: number;
+  totalSteps: number;
 };
 
 export type WorkflowStep = {

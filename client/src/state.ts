@@ -6,6 +6,7 @@ import type {
   PermissionRequest,
   ServerEvent,
   SessionState,
+  WorkflowCheckpoint,
 } from '../../server/protocol.ts';
 
 export type ChatMessage = {
@@ -24,11 +25,20 @@ export type ApprovalEntry = {
   decision: 'allow' | 'always' | 'deny' | null;
 };
 
-export type ThreadEntry = ChatMessage | ApprovalEntry;
+export type CheckpointEntry = {
+  kind: 'checkpoint';
+  /** `${checkpoint.id}-${checkpoint.status}` : running/done/gate du même id sont 3 entrées distinctes. */
+  id: string;
+  checkpoint: WorkflowCheckpoint;
+};
+
+export type ThreadEntry = ChatMessage | ApprovalEntry | CheckpointEntry;
 
 export type AppState = {
   thread: ThreadEntry[];
   status: SessionState['status'];
+  /** Rappel d'étape courante pour la barre supérieure ; `null` hors workflow. */
+  currentWorkflowStep: { index: number; total: number; label: string } | null;
   toolActivityCount: number;
   error: string | null;
   granted: GrantedPermission[];
@@ -49,6 +59,7 @@ export type AppState = {
 export const initialState: AppState = {
   thread: [],
   status: 'idle',
+  currentWorkflowStep: null,
   toolActivityCount: 0,
   error: null,
   granted: [],
@@ -163,10 +174,32 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
     case 'files.changed':
       return { ...state, changedFiles: event.files };
 
-    // Événements de protocole encore sans consommateur (livrés au fil de la tranche 3). Listés
-    // explicitement : ajouter un ServerEvent sans le traiter ici doit casser la compilation.
-    case 'workflow.checkpoint':
-      return state;
+    case 'workflow.checkpoint': {
+      const { checkpoint } = event;
+      const entry: CheckpointEntry = {
+        kind: 'checkpoint',
+        id: `${checkpoint.id}-${checkpoint.status}`,
+        checkpoint,
+      };
+      // Règle de mise à jour de currentWorkflowStep (non devinable sans le brief) :
+      // - 'running' pose le rappel d'étape sur l'étape qui démarre.
+      // - 'gate' le laisse tel quel : l'étape affichée reste celle qui vient de suspendre,
+      //   jusqu'à ce que la suivante démarre.
+      // - 'done' ne le remet à null que s'il s'agit de la dernière étape du workflow
+      //   (stepIndex === totalSteps - 1) : c'est ce qui fait disparaître le rappel hors workflow.
+      //   Un 'done' intermédiaire laisse le rappel inchangé (la prochaine 'running' le mettra à jour).
+      let currentWorkflowStep = state.currentWorkflowStep;
+      if (checkpoint.status === 'running') {
+        currentWorkflowStep = {
+          index: checkpoint.stepIndex,
+          total: checkpoint.totalSteps,
+          label: checkpoint.label,
+        };
+      } else if (checkpoint.status === 'done' && checkpoint.stepIndex === checkpoint.totalSteps - 1) {
+        currentWorkflowStep = null;
+      }
+      return { ...state, thread: [...state.thread, entry], currentWorkflowStep };
+    }
 
     default: {
       const exhaustive: never = event;

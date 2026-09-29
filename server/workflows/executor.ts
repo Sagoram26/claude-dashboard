@@ -26,8 +26,16 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
   }
 
   async function runStep(step: WorkflowStep, index: number): Promise<void> {
+    const totalSteps = workflow!.steps.length;
     const startedAt = Date.now();
-    deps.emitCheckpoint({ id: step.id, label: step.label, status: 'running', model: step.model });
+    deps.emitCheckpoint({
+      id: step.id,
+      label: step.label,
+      status: 'running',
+      model: step.model,
+      stepIndex: index,
+      totalSteps,
+    });
     await deps.applyRuntime(runtimeArgs(step));
     deps.send(step.prompt);
     await deps.waitForTurnEnd();
@@ -37,9 +45,18 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
       status: 'done',
       model: step.model,
       durationMs: Date.now() - startedAt,
+      stepIndex: index,
+      totalSteps,
     });
 
     if (step.gate) {
+      deps.emitCheckpoint({
+        id: step.id,
+        label: step.label,
+        status: 'gate',
+        stepIndex: index,
+        totalSteps,
+      });
       internalState = { workflowId: workflow!.id, currentStepIndex: index, status: 'gated' };
       return;
     }
