@@ -47,6 +47,21 @@ test('la recherche filtre par sous-chaine insensible a la casse sur label et des
   expect(screen.queryByText('Skill sans rapport')).toBeNull();
 });
 
+test('un meme terme de recherche trouve un prompt, un skill et un subagent (critere de fin point 7)', () => {
+  const items = [
+    item({ id: 'p1', type: 'prompt', label: 'Deployer via GITHUB', description: 'lance un deploiement' }),
+    item({ id: 's1', type: 'skill', label: 'Skill github', description: 'interagit avec github' }),
+    item({ id: 'a1', type: 'subagent', label: 'Un agent', description: 'gere les PR github' }),
+  ];
+  render(<CommandPalette open={true} items={items} onSelect={() => {}} onClose={() => {}} />);
+
+  fireEvent.change(screen.getByLabelText(/rechercher une commande/i), { target: { value: 'github' } });
+
+  expect(screen.getByText('Deployer via GITHUB')).toBeTruthy();
+  expect(screen.getByText('Skill github')).toBeTruthy();
+  expect(screen.getByText('Un agent')).toBeTruthy();
+});
+
 test('les onglets de type restreignent la liste, combines au filtre texte', () => {
   const items = [
     item({ id: 'p1', type: 'prompt', label: 'Alpha prompt' }),
@@ -73,6 +88,33 @@ test('cliquer un resultat appelle onSelect avec cet item', () => {
   fireEvent.click(screen.getByText('Cliquable'));
 
   expect(selected).toEqual([items[0]]);
+});
+
+test('Enter dans le champ de recherche appelle onSelect avec le premier resultat visible', () => {
+  const selected: PaletteItem[] = [];
+  const items = [
+    item({ id: 'p1', type: 'prompt', label: 'Premier prompt' }),
+    item({ id: 's1', type: 'skill', label: 'Deuxieme skill' }),
+  ];
+  render(<CommandPalette open={true} items={items} onSelect={(i) => selected.push(i)} onClose={() => {}} />);
+
+  fireEvent.keyDown(screen.getByLabelText(/rechercher une commande/i), { key: 'Enter' });
+
+  expect(selected).toEqual([items[0]]);
+});
+
+test('Enter selectionne le premier resultat de la liste filtree courante, pas le premier de la liste complete', () => {
+  const selected: PaletteItem[] = [];
+  const items = [
+    item({ id: 'p1', type: 'prompt', label: 'Premier prompt' }),
+    item({ id: 's1', type: 'skill', label: 'Deuxieme skill special' }),
+  ];
+  render(<CommandPalette open={true} items={items} onSelect={(i) => selected.push(i)} onClose={() => {}} />);
+
+  fireEvent.change(screen.getByLabelText(/rechercher une commande/i), { target: { value: 'special' } });
+  fireEvent.keyDown(screen.getByLabelText(/rechercher une commande/i), { key: 'Enter' });
+
+  expect(selected).toEqual([items[1]]);
 });
 
 test('Escape appelle onClose', () => {
