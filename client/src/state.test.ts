@@ -331,6 +331,54 @@ test('un done qui n est pas la derniere etape ne remet pas currentWorkflowStep a
   expect(state.currentWorkflowStep).toEqual({ index: 0, total: 2, label: 'Étape 1' });
 });
 
+test('workflows.list remplace la liste des workflows disponibles, sans perdre le reste de l etat', () => {
+  const seeded = reduceEvent(initialState, { type: 'cost.usage', totalUsd: 1.5 });
+  const workflows = [{ id: 'w1', name: 'Mon workflow', steps: [] }];
+  const state = reduceEvent(seeded, { type: 'workflows.list', workflows });
+
+  expect(state.workflows).toEqual(workflows);
+  expect(state.costUsd).toBe(1.5);
+});
+
+test('workflows.list successifs remplacent, n accumulent pas', () => {
+  const seeded = reduceEvent(initialState, { type: 'cost.usage', totalUsd: 3 });
+  let state = reduceEvent(seeded, {
+    type: 'workflows.list',
+    workflows: [{ id: 'w1', name: 'Un', steps: [] }],
+  });
+  state = reduceEvent(state, {
+    type: 'workflows.list',
+    workflows: [{ id: 'w2', name: 'Deux', steps: [] }],
+  });
+
+  expect(state.workflows).toEqual([{ id: 'w2', name: 'Deux', steps: [] }]);
+  expect(state.costUsd).toBe(3);
+});
+
+test('prompts.list remplace la liste des prompts disponibles, sans perdre le reste de l etat', () => {
+  const seeded = reduceEvent(initialState, { type: 'cost.usage', totalUsd: 2.5 });
+  const prompts = [{ id: 'p1', name: 'Mon prompt', text: 'Fais X', pinned: false }];
+  const state = reduceEvent(seeded, { type: 'prompts.list', prompts });
+
+  expect(state.prompts).toEqual(prompts);
+  expect(state.costUsd).toBe(2.5);
+});
+
+test('prompts.list successifs remplacent, n accumulent pas', () => {
+  const seeded = reduceEvent(initialState, { type: 'cost.usage', totalUsd: 4 });
+  let state = reduceEvent(seeded, {
+    type: 'prompts.list',
+    prompts: [{ id: 'p1', name: 'Un', text: 'X', pinned: false }],
+  });
+  state = reduceEvent(state, {
+    type: 'prompts.list',
+    prompts: [{ id: 'p2', name: 'Deux', text: 'Y', pinned: true }],
+  });
+
+  expect(state.prompts).toEqual([{ id: 'p2', name: 'Deux', text: 'Y', pinned: true }]);
+  expect(state.costUsd).toBe(4);
+});
+
 test('le done de la derniere etape barree ne remet pas currentWorkflowStep a null (barriere en attente)', () => {
   // Workflow de 2 étapes, la dernière (index 1) porte une barrière : la séquence reçue par le
   // client est running(1) -> done(1, gate:true) -> gate(1). Le workflow n'est pas terminé, il est

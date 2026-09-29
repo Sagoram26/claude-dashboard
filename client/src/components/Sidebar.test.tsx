@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { Sidebar } from './Sidebar.tsx';
-import type { PromptDefinition } from '../../../server/protocol.ts';
+import type { PromptDefinition, WorkflowDefinition } from '../../../server/protocol.ts';
 
 beforeEach(() => {
   localStorage.clear();
@@ -20,6 +20,11 @@ const base = {
   onSavePrompt: () => {},
   onDeletePrompt: () => {},
   onTogglePinPrompt: () => {},
+  workflows: [] as WorkflowDefinition[],
+  availableModels: [] as { value: string; displayName: string }[],
+  onSaveWorkflow: () => {},
+  onDeleteWorkflow: () => {},
+  onLaunchWorkflow: () => {},
 };
 
 test('trois icones selectionnent la colonne', () => {
@@ -120,4 +125,26 @@ test('colonne accueil, section favoris : aucun favori epingle garde le texte Auc
   render(<Sidebar {...base} prompts={[{ id: 'p1', name: 'Prompt normal', text: 'Y', pinned: false }]} />);
 
   expect(screen.getByText('Aucun favori')).toBeTruthy();
+});
+
+test('colonne lancer : la section workflows liste les workflows et permet de les lancer', () => {
+  const launched: string[] = [];
+  render(
+    <Sidebar
+      {...base}
+      column="lancer"
+      workflows={[{ id: 'w1', name: 'Mon workflow', steps: [] }]}
+      onLaunchWorkflow={(id) => launched.push(id)}
+    />
+  );
+
+  expect(screen.getAllByText('Mon workflow').length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole('button', { name: /^lancer$/i }));
+  expect(launched).toEqual(['w1']);
+});
+
+test('colonne lancer : le WorkflowEditor est monte avec les workflows fournis', () => {
+  render(<Sidebar {...base} column="lancer" workflows={[{ id: 'w1', name: 'Mon workflow', steps: [] }]} />);
+
+  expect(screen.getByRole('button', { name: /nouveau workflow/i })).toBeTruthy();
 });
