@@ -9,7 +9,7 @@ import { WebSocket } from 'ws';
 import { createServer } from './index.ts';
 import { createSessionManager } from './session/manager.ts';
 import { createGitWatcher } from './session/git-watcher.ts';
-import { createWorkflowExecutor } from './workflows/executor.ts';
+import { createWorkflowController, creerAttenteDeTour } from './workflows/wiring.ts';
 import { reduceEvent, initialState, type AppState } from '../client/src/state.ts';
 import { parseClientCommand, type ServerEvent, type WorkflowDefinition } from './protocol.ts';
 
@@ -334,80 +334,58 @@ function queryPilotee() {
 }
 
 /**
- * Enveloppe `emit` pour construire `waitForTurnEnd()` sans toucher à `SessionManager` : broadcast
- * l'événement normalement, et résout les attentes en cours quand le statut repasse à `'idle'`.
- * Même motif que `server/index.ts` §2 du brief, dupliqué ici car non exporté par `createServer`.
- *
- * Correctif round 1 de revue : chaque attente est désormais taguée par un jeton `owner` propre à
- * l'exécuteur qui l'a enregistrée. Au passage à `'idle'`, seuls les résolveurs dont le jeton
- * correspond encore au propriétaire courant (`getActiveOwner()`) sont débloqués — les résolveurs
- * d'un exécuteur remplacé par un `workflow.start` plus récent ne sont jamais résolus : cet
- * exécuteur reste bloqué indéfiniment sur son étape en cours, sans jamais émettre de nouveau
- * checkpoint ni relancer `manager.send`. C'est un abandon silencieux et documenté, pas une
- * annulation active de l'appel SDK en cours (`executor.ts` n'est pas modifié).
+ * I1 (revue finale de branche tranche 4) : `creerAttenteDeTour` et le câblage des commandes
+ * workflow.* et prompt.* vivaient recopiés ici, hors de `server/index.ts` (enfermé dans le bloc
+ * `if (isEntrypoint)`). Le test de couture validait donc une COPIE du code, jamais le code de
+ * production réel. Les deux vivent maintenant dans `server/workflows/wiring.ts`, importés ici ET
+ * par `server/index.ts` : ce montage utilise le câblage réel, pas une reconstruction.
  */
-function creerAttenteDeTour(broadcast: (e: ServerEvent) => void, getActiveOwner: () => unknown) {
-  let waiters: Array<{ resolve: () => void; owner: unknown }> = [];
-  const emit = (event: ServerEvent) => {
-    broadcast(event);
-    if (event.type === 'session.state' && event.state.status === 'idle') {
-      const toWake = waiters;
-      waiters = [];
-      const active = getActiveOwner();
-      for (const w of toWake) {
-        if (w.owner === active) w.resolve();
-      }
-    }
-  };
-  const waitForTurnEndFor = (owner: unknown) => () =>
-    new Promise<void>((resolve) => waiters.push({ resolve, owner }));
-  return { emit, waitForTurnEndFor };
+function ecrireWorkflow(dir: string, workflow: WorkflowDefinition): Promise<void> {
+  return writeFile(join(dir, `${workflow.id}.json`), JSON.stringify(workflow));
 }
 
 /**
- * Montage pour le test de couture du workflow : un vrai serveur, un vrai gestionnaire, un vrai
- * exécuteur de workflow construit exactement comme dans `server/index.ts`, un vrai socket, un vrai
- * `reduceEvent` côté client.
+ * Montage pour le test de couture du workflow : un vrai serveur, un vrai gestionnaire, le vrai
+ * `createWorkflowController`/`creerAttenteDeTour` de production, un vrai socket, un vrai
+ * `reduceEvent` côté client. `workflowsDir` doit contenir les fichiers `<id>.json` des workflows
+ * utilisés par le test (comme `server/index.ts` le fait depuis le disque réel) : `workflow.start`
+ * passe par `loadWorkflow`, pas par une injection directe en mémoire.
  */
-async function monterCoutureWorkflow() {
-  const { query } = queryQuiRepondAChaqueTour();
-
+async function monterCoutureWorkflow(workflowsDir: string, queryFn = queryQuiRepondAChaqueTour().query) {
   let manager: ReturnType<typeof createSessionManager> | null = null;
-  let executor: ReturnType<typeof createWorkflowExecutor> | null = null;
+  let workflowController!: ReturnType<typeof createWorkflowController>;
 
   const server = await createServer(0, {
     onConnect: (send) => {
       if (manager) send({ type: 'session.state', state: manager.state() });
+      workflowController.onConnect(send);
     },
     onCommand: (cmd) => {
+      workflowController.onCommand(cmd);
       if (!manager) return;
       if (cmd.type === 'message.send') manager.send(cmd.text);
-      if (cmd.type === 'workflow.resume' && cmd.action === 'continue') {
-        void executor?.continueAfterGate();
-      }
-      if (cmd.type === 'workflow.resume' && cmd.action === 'correct') {
-        executor?.correctAtGate();
-      }
     },
   });
 
-  // Un seul exécuteur vit sur toute la durée de ce montage : le jeton `owner` est fixe, la
-  // logique de filtrage de `creerAttenteDeTour` ne change donc rien au comportement de ces tests.
-  const owner = {};
-  const { emit, waitForTurnEndFor } = creerAttenteDeTour((e) => server.broadcast(e), () => owner);
+  const { emit, waitForTurnEndFor } = creerAttenteDeTour(
+    (e) => server.broadcast(e),
+    () => workflowController.getActiveOwner()
+  );
 
   manager = createSessionManager({
     cwd: process.cwd(),
     emit,
-    queryFn: query as never,
+    queryFn: queryFn as never,
   });
 
-  executor = createWorkflowExecutor({
-    applyRuntime: manager.applyRuntime,
-    send: manager.send,
-    waitForTurnEnd: waitForTurnEndFor(owner),
-    emitCheckpoint: (checkpoint) => server.broadcast({ type: 'workflow.checkpoint', checkpoint }),
+  workflowController = createWorkflowController({
+    workflowsDir,
+    promptsDir: workflowsDir, // non exerce par ces tests, un seul dossier suffit
+    getManager: () => manager,
+    broadcast: (e) => server.broadcast(e),
+    waitForTurnEndFor,
   });
+  await workflowController.loadInitialLists();
 
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
   let state: AppState = initialState;
@@ -421,7 +399,7 @@ async function monterCoutureWorkflow() {
 
   return {
     manager,
-    executor,
+    workflowController,
     server,
     socket,
     recus,
@@ -457,8 +435,7 @@ function checkpointIds(state: AppState): string[] {
 }
 
 test('un workflow traverse le systeme entier jusqu a la barriere puis reprend, sans double de protocole', async () => {
-  const { executor, socket, recus, state, fermer } = await monterCoutureWorkflow();
-  try {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
   const workflow: WorkflowDefinition = {
     id: 'wf-couture',
     name: 'Workflow de couture',
@@ -468,8 +445,13 @@ test('un workflow traverse le systeme entier jusqu a la barriere puis reprend, s
       { id: 's3', label: 'Étape 3', prompt: 'fais 3', model: 'model-c', gate: false },
     ],
   };
+  await ecrireWorkflow(dir, workflow);
 
-  void executor.start(workflow);
+  const { socket, recus, state, fermer } = await monterCoutureWorkflow(dir);
+  try {
+  // Passe par le protocole reel, comme le client : workflow.start ne prend qu'un workflowId, le
+  // controleur charge le fichier depuis le disque via loadWorkflow (pas d'injection en memoire).
+  socket.send(JSON.stringify({ type: 'workflow.start', workflowId: workflow.id }));
 
   const deadline1 = Date.now() + 3000;
   while (Date.now() < deadline1 && checkpointIds(state()).length < 5) {
@@ -531,8 +513,7 @@ test('un workflow traverse le systeme entier jusqu a la barriere puis reprend, s
 });
 
 test('workflow.resume avec action correct suspend le workflow sans jamais lancer l etape suivante', async () => {
-  const { executor, socket, state, fermer } = await monterCoutureWorkflow();
-  try {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
   const workflow: WorkflowDefinition = {
     id: 'wf-correct',
     name: 'Workflow barre des le debut',
@@ -541,8 +522,11 @@ test('workflow.resume avec action correct suspend le workflow sans jamais lancer
       { id: 's2', label: 'Étape 2', prompt: 'fais 2', gate: false },
     ],
   };
+  await ecrireWorkflow(dir, workflow);
 
-  void executor.start(workflow);
+  const { socket, state, fermer } = await monterCoutureWorkflow(dir);
+  try {
+  socket.send(JSON.stringify({ type: 'workflow.start', workflowId: workflow.id }));
 
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline && checkpointIds(state()).length < 3) {
@@ -563,116 +547,204 @@ test('workflow.resume avec action correct suspend le workflow sans jamais lancer
 });
 
 /**
- * Round 1 de revue de la feature 06 : un `workflow.start` reçu pendant qu'un workflow tourne déjà
- * doit remplacer l'exécuteur SANS que l'ancien continue à produire des checkpoints en arrière-plan
- * ni à entrelacer ses appels SDK avec ceux du nouveau. Montage dédié qui reproduit exactement le
- * câblage de `server/index.ts` (owner token par exécuteur, `emitCheckpoint` gardé par
- * `activeOwner`), avec un double SDK entièrement piloté (`queryPilotee`) pour contrôler l'instant
- * exact du remplacement sans dépendre du timing réel du double auto-répondant.
+ * B3 (revue finale de branche tranche 4) : un `workflow.start` reçu pendant qu'un tour est deja en
+ * cours (l'agent genere deja) faisait deborder `waitForTurnEnd` sur le tour du MAUVAIS evenement —
+ * tout se decalait d'un tour. Le round 1 de revue avait attenue les symptomes (remplacement propre
+ * de l'executeur, checkpoints de l'ancien coupes), mais pas la cause : ce round-ci refuse
+ * purement et simplement un nouveau `workflow.start` tant que `manager.state().status !== 'idle'`
+ * OU qu'un executeur est deja actif (y compris suspendu a une barriere), avec un evenement
+ * `{type:'error', ...}` explicite. Avec cette garde, l'entrelacement que testait l'ancien test
+ * ('un workflow.start recu pendant qu un workflow tourne deja remplace l executeur...') devient
+ * structurellement impossible : ce test est remplace par la preuve du refus, comme demande dans le
+ * brief de revue.
+ *
+ * Risque residuel documente (hors perimetre de cette garde) : un MESSAGE UTILISATEUR (pas un
+ * workflow.start) tape pendant qu'une etape de workflow est en cours n'est pas bloque par cette
+ * garde et peut encore faire deborder `waitForTurnEnd` sur le mauvais tour — voir le rapport final.
  */
-test('un workflow.start recu pendant qu un workflow tourne deja remplace l executeur et arrete les checkpoints de l ancien', async () => {
-  const { query, repondreAuProchainTour } = queryPilotee();
-
-  const workflows: Record<string, WorkflowDefinition> = {
-    wfA: {
-      id: 'wfA',
-      name: 'Workflow A',
-      steps: [
-        { id: 'a1', label: 'A1', prompt: 'a1', gate: false },
-        { id: 'a2', label: 'A2', prompt: 'a2', gate: false },
-      ],
-    },
-    wfB: {
-      id: 'wfB',
-      name: 'Workflow B',
-      steps: [{ id: 'b1', label: 'B1', prompt: 'b1', gate: false }],
-    },
+test('workflow.start est refuse avec une erreur quand un workflow tourne deja ou est suspendu a une barriere (B3)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
+  const wfA: WorkflowDefinition = {
+    id: 'wfA',
+    name: 'Workflow A',
+    steps: [
+      { id: 'a1', label: 'A1', prompt: 'a1', gate: true },
+      { id: 'a2', label: 'A2', prompt: 'a2', gate: false },
+    ],
   };
+  const wfB: WorkflowDefinition = {
+    id: 'wfB',
+    name: 'Workflow B',
+    steps: [{ id: 'b1', label: 'B1', prompt: 'b1', gate: false }],
+  };
+  await ecrireWorkflow(dir, wfA);
+  await ecrireWorkflow(dir, wfB);
 
-  let manager: ReturnType<typeof createSessionManager> | null = null;
-  let activeOwner: object | null = null;
-  let waitForTurnEndFor!: (owner: unknown) => () => Promise<void>;
-
-  const server = await createServer(0, {
-    onConnect: (send) => {
-      if (manager) send({ type: 'session.state', state: manager.state() });
-    },
-    onCommand: (cmd) => {
-      if (!manager) return;
-      if (cmd.type === 'workflow.start') {
-        const workflow = workflows[cmd.workflowId];
-        if (!workflow) return;
-        // Meme motif que server/index.ts §2 (corrige) : un jeton `owner` propre a CET exécuteur,
-        // jamais une closure emit/waitForTurnEnd partagee entre exécuteurs successifs.
-        const owner = {};
-        const nouvelExecuteur = createWorkflowExecutor({
-          applyRuntime: manager.applyRuntime,
-          send: manager.send,
-          waitForTurnEnd: waitForTurnEndFor(owner),
-          emitCheckpoint: (checkpoint) => {
-            if (activeOwner === owner) server.broadcast({ type: 'workflow.checkpoint', checkpoint });
-          },
-        });
-        activeOwner = owner;
-        void nouvelExecuteur.start(workflow);
-      }
-    },
-  });
-
-  const attente = creerAttenteDeTour((e) => server.broadcast(e), () => activeOwner);
-  waitForTurnEndFor = attente.waitForTurnEndFor;
-
-  manager = createSessionManager({
-    cwd: process.cwd(),
-    emit: attente.emit,
-    queryFn: query as never,
-  });
-
-  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
-  let state: AppState = initialState;
-  socket.on('message', (raw) => {
-    state = reduceEvent(state, JSON.parse(raw.toString()) as ServerEvent);
-  });
-  await new Promise((resolve) => socket.on('open', resolve));
+  const { query, repondreAuProchainTour } = queryPilotee();
+  const { socket, recus, state, fermer } = await monterCoutureWorkflow(dir, query);
 
   try {
     socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'wfA' }));
     await new Promise((r) => setTimeout(r, 50));
 
-    // A a demarre (checkpoint running emis synchroniquement par l'executeur), mais son premier
-    // tour reste bloque : queryPilotee n'a encore rien debloque.
-    assert.deepEqual(checkpointIds(state), ['a1-running']);
+    // A a demarre (checkpoint running emis synchroniquement), son tour reste en cours (bloque par
+    // queryPilotee) : manager.state().status est 'generating', pas 'idle'.
+    assert.deepEqual(checkpointIds(state()), ['a1-running']);
 
-    // B remplace A avant que le tour de A ne se termine.
     socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'wfB' }));
     await new Promise((r) => setTimeout(r, 50));
-    assert.deepEqual(checkpointIds(state), ['a1-running', 'b1-running']);
 
-    // Debloque le tour de A (deja en file dans le double pilote) : son idle est ignore car son
-    // owner n'est plus l'owner actif, l'exécuteur A reste bloque sur waitForTurnEnd() a jamais.
-    repondreAuProchainTour();
-    // Le tour de B n'entre dans la file du double pilote qu'une fois que le generateur a fini de
-    // traiter le tour de A (il ne traite qu'un message a la fois) : il faut laisser cette chaine
-    // de microtaches se derouler avant de pouvoir debloquer le tour de B a son tour.
-    await new Promise((r) => setTimeout(r, 50));
-    repondreAuProchainTour();
-    await new Promise((r) => setTimeout(r, 200));
-
-    const ids = checkpointIds(state);
-    assert.deepEqual(
-      ids,
-      ['a1-running', 'b1-running', 'b1-done'],
-      'les checkpoints de A abandonne ne doivent plus jamais apparaitre apres son remplacement par B'
+    assert.deepEqual(checkpointIds(state()), ['a1-running'], 'B ne doit jamais demarrer pendant que A tourne');
+    assert.ok(
+      recus.some((e) => e.type === 'error'),
+      'un evenement error explicite doit etre emis au lieu d ignorer silencieusement'
     );
+
+    // Debloque le tour de A : il atteint sa barriere, manager.state().status repasse a 'idle' mais
+    // le workflow reste actif (suspendu).
+    repondreAuProchainTour();
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !checkpointIds(state()).includes('a1-gate')) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(checkpointIds(state()), ['a1-running', 'a1-done', 'a1-gate']);
+
+    const erreursAvant = recus.filter((e) => e.type === 'error').length;
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'wfB' }));
+    await new Promise((r) => setTimeout(r, 50));
+
     assert.equal(
-      ids.some((id) => id.startsWith('a2-')),
+      checkpointIds(state()).some((id) => id.startsWith('b1-')),
       false,
-      'l etape 2 du workflow abandonne A ne doit jamais demarrer'
+      'B ne doit pas demarrer non plus pendant que A est suspendu a sa barriere'
+    );
+    assert.equal(recus.filter((e) => e.type === 'error').length, erreursAvant + 1);
+  } finally {
+    await fermer();
+  }
+});
+
+/**
+ * B2, corollaire (revue finale de branche tranche 4) : le `checkpointId` recu du client etait
+ * jusque-la ignore par `workflow.resume` — n'importe quel vieux bouton "Continuer" reste affiche
+ * dans le fil (d'une barriere deja franchie, ou d'une session precedente) agissait sur la barriere
+ * COURANTE de l'executeur actif. Le controleur doit desormais verifier que `checkpointId`
+ * correspond au dernier checkpoint `'gate'` reellement en attente avant d'appeler
+ * `continueAfterGate()`/`correctAtGate()`.
+ */
+test('un checkpointId perime dans workflow.resume est ignore, n avance pas la barriere courante (B2 corollaire)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
+  const wf: WorkflowDefinition = {
+    id: 'wf-perime',
+    name: 'Workflow',
+    steps: [
+      { id: 's1', label: 'Étape 1', prompt: 'p1', gate: true },
+      { id: 's2', label: 'Étape 2', prompt: 'p2', gate: false },
+    ],
+  };
+  await ecrireWorkflow(dir, wf);
+
+  const { socket, state, fermer } = await monterCoutureWorkflow(dir);
+  try {
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: wf.id }));
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && checkpointIds(state()).length < 3) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(checkpointIds(state()), ['s1-running', 's1-done', 's1-gate']);
+
+    // Un vieux bouton "Continuer" d'une barriere qui n'existe plus (ou d'une session precedente) :
+    // checkpointId perime, doit etre ignore silencieusement, pas avancer s1.
+    socket.send(JSON.stringify({ type: 'workflow.resume', checkpointId: 's0-perime', action: 'continue' }));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(checkpointIds(state()), ['s1-running', 's1-done', 's1-gate']);
+
+    // Le VRAI checkpointId courant fonctionne toujours.
+    socket.send(JSON.stringify({ type: 'workflow.resume', checkpointId: 's1', action: 'continue' }));
+    const deadline2 = Date.now() + 3000;
+    while (Date.now() < deadline2 && checkpointIds(state()).length < 5) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(checkpointIds(state()), ['s1-running', 's1-done', 's1-gate', 's2-running', 's2-done']);
+  } finally {
+    await fermer();
+  }
+});
+
+/**
+ * I6 (revue finale de branche tranche 4) : une barriere en attente ne survivait pas a un
+ * rechargement de page — `emitCheckpoint` ne passait pas par l'historique rejouable, et `onConnect`
+ * ne rejouait pas la barriere courante (contrairement a `pendingPermissions()`). Le controleur
+ * expose desormais le dernier checkpoint `'gate'` encore actif et le rejoue a la connexion.
+ */
+test('une barriere en attente survit a une reconnexion (I6)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
+  const wf: WorkflowDefinition = {
+    id: 'wf-reconnect',
+    name: 'Workflow',
+    steps: [{ id: 's1', label: 'Étape 1', prompt: 'p1', gate: true }],
+  };
+  await ecrireWorkflow(dir, wf);
+
+  const { socket, server, state, fermer } = await monterCoutureWorkflow(dir);
+  try {
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: wf.id }));
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !checkpointIds(state()).includes('s1-gate')) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(checkpointIds(state()), ['s1-running', 's1-done', 's1-gate']);
+
+    // Reconnexion : un NOUVEAU socket sur le meme serveur (simule un F5 cote client).
+    const socket2 = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+    let state2: AppState = initialState;
+    socket2.on('message', (raw) => {
+      state2 = reduceEvent(state2, JSON.parse(raw.toString()) as ServerEvent);
+    });
+    await new Promise((resolve) => socket2.on('open', resolve));
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.ok(
+      checkpointIds(state2).includes('s1-gate'),
+      'le nouveau socket doit recevoir la barriere en attente, comme pendingPermissions()'
+    );
+    socket2.close();
+  } finally {
+    await fermer();
+  }
+});
+
+/**
+ * I7 (revue finale de branche tranche 4) : un workflow sans `steps` (fichier `.json` edite a la
+ * main) faisait lever une exception dans `executor.ts` au demarrage, et les chaines `.then(...)`
+ * du traitement des commandes workflow.* et prompt.* n'avaient pas de `.catch` — une promesse rejetee non capturee
+ * fait tomber le process Node entier. Verifie qu'une entree malformee produit une erreur cote
+ * protocole au lieu de faire tomber le serveur (le serveur repond encore a la commande suivante).
+ */
+test('un workflow sans etapes emet une erreur explicite au lieu de faire tomber le process (I7)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cd-couture-wf-'));
+  await writeFile(join(dir, 'vide.json'), JSON.stringify({ id: 'vide', name: 'Vide', steps: [] }));
+
+  const { socket, recus, fermer } = await monterCoutureWorkflow(dir);
+  try {
+    socket.send(JSON.stringify({ type: 'workflow.start', workflowId: 'vide' }));
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.ok(
+      recus.some((e) => e.type === 'error'),
+      'un workflow sans etapes doit emettre une erreur, pas lever'
+    );
+
+    // Le serveur est toujours vivant : la commande suivante fonctionne normalement.
+    socket.send(JSON.stringify({ type: 'message.send', text: 'toujours la ?' }));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(
+      recus.filter((e) => e.type === 'message.complete' && e.role === 'assistant').length,
+      1,
+      'le process doit avoir survecu pour repondre a la commande suivante'
     );
   } finally {
-    socket.close();
-    await arreterAvecGarantie(manager);
-    await server.close();
+    await fermer();
   }
 });
 
