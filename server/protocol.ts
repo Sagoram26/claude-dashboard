@@ -88,6 +88,12 @@ export type WorkflowCheckpoint = {
   durationMs?: number;
   stepIndex: number;
   totalSteps: number;
+  /**
+   * Reflète `WorkflowStep.gate` de l'étape source. Permet au client de savoir, dès le `'done'`,
+   * si un checkpoint `'gate'` suit pour ce même id — sans quoi le `'done'` de la dernière étape
+   * d'un workflow barré serait indiscernable d'une vraie fin de workflow.
+   */
+  gate: boolean;
 };
 
 export type WorkflowStep = {

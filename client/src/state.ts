@@ -183,19 +183,28 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
       };
       // Règle de mise à jour de currentWorkflowStep (non devinable sans le brief) :
       // - 'running' pose le rappel d'étape sur l'étape qui démarre.
-      // - 'gate' le laisse tel quel : l'étape affichée reste celle qui vient de suspendre,
-      //   jusqu'à ce que la suivante démarre.
+      // - 'gate' le repose explicitement sur sa propre étape (au lieu de se contenter de ne rien
+      //   faire) : l'étape affichée reste celle qui vient de suspendre, jusqu'à ce que la suivante
+      //   démarre.
       // - 'done' ne le remet à null que s'il s'agit de la dernière étape du workflow
-      //   (stepIndex === totalSteps - 1) : c'est ce qui fait disparaître le rappel hors workflow.
-      //   Un 'done' intermédiaire laisse le rappel inchangé (la prochaine 'running' le mettra à jour).
+      //   (stepIndex === totalSteps - 1) ET que cette étape ne porte pas de barrière
+      //   (`!checkpoint.gate`). Sans ce second critère, le 'done' de la dernière étape d'un
+      //   workflow barré effacerait le rappel juste avant que le checkpoint 'gate' qui le suit
+      //   n'arrive — alors que le workflow est suspendu, pas terminé. Un 'done' intermédiaire (ni
+      //   dernière étape, ni barrière) laisse le rappel inchangé (la prochaine 'running' le mettra
+      //   à jour).
       let currentWorkflowStep = state.currentWorkflowStep;
-      if (checkpoint.status === 'running') {
+      if (checkpoint.status === 'running' || checkpoint.status === 'gate') {
         currentWorkflowStep = {
           index: checkpoint.stepIndex,
           total: checkpoint.totalSteps,
           label: checkpoint.label,
         };
-      } else if (checkpoint.status === 'done' && checkpoint.stepIndex === checkpoint.totalSteps - 1) {
+      } else if (
+        checkpoint.status === 'done' &&
+        checkpoint.stepIndex === checkpoint.totalSteps - 1 &&
+        !checkpoint.gate
+      ) {
         currentWorkflowStep = null;
       }
       return { ...state, thread: [...state.thread, entry], currentWorkflowStep };

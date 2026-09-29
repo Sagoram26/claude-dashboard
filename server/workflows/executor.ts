@@ -35,6 +35,7 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
       model: step.model,
       stepIndex: index,
       totalSteps,
+      gate: step.gate,
     });
     await deps.applyRuntime(runtimeArgs(step));
     deps.send(step.prompt);
@@ -47,6 +48,7 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
       durationMs: Date.now() - startedAt,
       stepIndex: index,
       totalSteps,
+      gate: step.gate,
     });
 
     if (step.gate) {
@@ -56,6 +58,7 @@ export function createWorkflowExecutor(deps: WorkflowExecutorDeps) {
         status: 'gate',
         stepIndex: index,
         totalSteps,
+        gate: step.gate,
       });
       internalState = { workflowId: workflow!.id, currentStepIndex: index, status: 'gated' };
       return;

@@ -10,6 +10,7 @@ const checkpoint = (over: Partial<WorkflowCheckpoint> = {}): WorkflowCheckpoint 
   status: 'running',
   stepIndex: 0,
   totalSteps: 2,
+  gate: false,
   ...over,
 });
 
