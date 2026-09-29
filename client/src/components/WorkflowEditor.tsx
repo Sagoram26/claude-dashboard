@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { WorkflowDefinition, WorkflowStep } from '../../../server/protocol.ts';
 
 export type WorkflowEditorProps = {
@@ -20,16 +20,25 @@ const emptyWorkflow = (): WorkflowDefinition => ({
   steps: [emptyStep()],
 });
 
+/**
+ * I5, meme liste que MODES_OFFERTS dans server/session/manager.ts (et que MODES dans
+ * client/src/screens/Session.tsx) : pas d'import cross-couche pour si peu, tenir la liste a jour a
+ * la main si le SDK en expose un nouveau.
+ */
+const MODES_PERMISSION = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'];
+
 function StepEditor({
   step,
   availableModels,
-  availableAgents,
   onChange,
+  onRemove,
+  canRemove,
 }: {
   step: WorkflowStep;
   availableModels: WorkflowEditorProps['availableModels'];
-  availableAgents: WorkflowEditorProps['availableAgents'];
   onChange: (step: WorkflowStep) => void;
+  onRemove: () => void;
+  canRemove: boolean;
 }) {
   return (
     <div
@@ -68,14 +77,14 @@ function StepEditor({
         ))}
       </select>
       <select
-        aria-label="Subagent"
-        value={step.subagent ?? ''}
-        onChange={(e) => onChange({ ...step, subagent: e.target.value || undefined })}
+        aria-label="Mode de permission"
+        value={step.permissionMode ?? ''}
+        onChange={(e) => onChange({ ...step, permissionMode: e.target.value || undefined })}
       >
-        <option value="">— agent principal —</option>
-        {availableAgents.map((a) => (
-          <option key={a.name} value={a.name}>
-            {a.name}
+        <option value="">— défaut —</option>
+        {MODES_PERMISSION.map((m) => (
+          <option key={m} value={m}>
+            {m}
           </option>
         ))}
       </select>
@@ -89,6 +98,11 @@ function StepEditor({
         />
         Barrière
       </label>
+      {canRemove && (
+        <button type="button" className="pill" data-tone="warn" onClick={onRemove}>
+          Retirer
+        </button>
+      )}
     </div>
   );
 }
@@ -96,11 +110,17 @@ function StepEditor({
 export function WorkflowEditor({
   workflows,
   availableModels,
-  availableAgents,
+  // I5 (option a) : conserve pour la forme de l'API (le champ WorkflowStep.subagent reste dans le
+  // type/le store), mais plus utilisee par le rendu — le select trompeur qui la consommait est
+  // retire (voir StepEditor).
   onSave,
   onDelete,
 }: WorkflowEditorProps) {
   const [drafts, setDrafts] = useState<WorkflowDefinition[]>(workflows);
+
+  // I4 : voir la meme note dans PromptLibrary.tsx — useState(prop) ne se resynchronise jamais tout
+  // seul avec une mise a jour externe (workflows.list recu du serveur).
+  useEffect(() => setDrafts(workflows), [workflows]);
 
   const updateDraft = (id: string, next: WorkflowDefinition) => {
     setDrafts((prev) => prev.map((w) => (w.id === id ? next : w)));
@@ -124,24 +144,44 @@ export function WorkflowEditor({
             gap: 8,
           }}
         >
-          <div style={{ fontSize: 13, color: 'var(--text)' }}>{workflow.name}</div>
+          <input
+            aria-label="Nom du workflow"
+            value={workflow.name}
+            onChange={(e) => updateDraft(workflow.id, { ...workflow, name: e.target.value })}
+            style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+          />
 
           {workflow.steps.map((step, index) => (
             <StepEditor
               key={step.id}
               step={step}
               availableModels={availableModels}
-              availableAgents={availableAgents}
               onChange={(nextStep) =>
                 updateDraft(workflow.id, {
                   ...workflow,
                   steps: workflow.steps.map((s, i) => (i === index ? nextStep : s)),
                 })
               }
+              canRemove={workflow.steps.length > 1}
+              onRemove={() =>
+                updateDraft(workflow.id, {
+                  ...workflow,
+                  steps: workflow.steps.filter((_, i) => i !== index),
+                })
+              }
             />
           ))}
 
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="pill"
+              onClick={() =>
+                updateDraft(workflow.id, { ...workflow, steps: [...workflow.steps, emptyStep()] })
+              }
+            >
+              Ajouter une étape
+            </button>
             <button type="button" className="pill" onClick={() => onSave(workflow)}>
               Enregistrer
             </button>

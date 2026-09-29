@@ -74,7 +74,13 @@ export function CommandPalette({ open, items, onSelect, onClose }: CommandPalett
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key === 'Escape') {
+              // I3 : Session.tsx ecoute Echap sur `window` pour interrompre la generation en
+              // cours. Sans stopPropagation, fermer la palette pendant une etape de workflow
+              // interrompait le tour en cours sans que l'utilisateur l'ait demande.
+              e.stopPropagation();
+              onClose();
+            }
             if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0]!);
           }}
           placeholder="Rechercher une commande..."

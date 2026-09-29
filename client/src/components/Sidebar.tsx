@@ -209,7 +209,7 @@ export function Sidebar(props: SidebarProps) {
             {props.availableAgents.map((a) => (
               <div key={a.name}>{a.name}</div>
             ))}
-            <div style={{ color: 'var(--text-faint)' }}>Fan-out — désactivé en v1</div>
+            <div style={{ color: 'var(--text-faint)' }}>Fan-out — disponible en v2</div>
           </Section>
           <Section id="workflows" title="Workflows" defaultCollapsed={false}>
             {props.workflows.length > 0 && (

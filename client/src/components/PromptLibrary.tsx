@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PromptDefinition } from '../../../server/protocol.ts';
 
 export type PromptLibraryProps = {
@@ -16,6 +16,12 @@ const emptyPrompt = (): PromptDefinition => ({ id: genId(), name: 'Nouveau promp
 
 export function PromptLibrary({ prompts, onLaunch, onSave, onDelete, onTogglePin }: PromptLibraryProps) {
   const [drafts, setDrafts] = useState<PromptDefinition[]>(prompts);
+
+  // I4 : useState(prop) ne fige que la valeur initiale. Sans resynchronisation, "Supprimer" laisse
+  // la carte affichee jusqu'au prochain montage, "Enregistrer" peut la recreer, et l'etoile
+  // d'epinglage ne suit pas un prompts.list recu du serveur. Un brouillon non enregistre est perdu
+  // sur une mise a jour externe concurrente : acceptable en v1.
+  useEffect(() => setDrafts(prompts), [prompts]);
 
   const updateDraft = (id: string, next: PromptDefinition) => {
     setDrafts((prev) => prev.map((p) => (p.id === id ? next : p)));

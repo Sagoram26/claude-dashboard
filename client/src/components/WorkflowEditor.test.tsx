@@ -31,8 +31,8 @@ test('liste les workflows existants par nom', () => {
     />
   );
 
-  expect(screen.getByText('Mon workflow')).toBeTruthy();
-  expect(screen.getByText('Autre workflow')).toBeTruthy();
+  expect(screen.getByDisplayValue('Mon workflow')).toBeTruthy();
+  expect(screen.getByDisplayValue('Autre workflow')).toBeTruthy();
 });
 
 test('le bouton nouveau workflow ajoute une entree editable avec au moins une etape vide', () => {
@@ -242,7 +242,7 @@ test('les brouillons se resynchronisent quand la prop workflows change (I4)', ()
     />
   );
 
-  expect(screen.getByText('Mon workflow')).toBeTruthy();
+  expect(screen.getByDisplayValue('Mon workflow')).toBeTruthy();
 
   rerender(
     <WorkflowEditor
@@ -254,6 +254,6 @@ test('les brouillons se resynchronisent quand la prop workflows change (I4)', ()
     />
   );
 
-  expect(screen.queryByText('Mon workflow')).toBeNull();
-  expect(screen.getByText('Workflow externe')).toBeTruthy();
+  expect(screen.queryByDisplayValue('Mon workflow')).toBeNull();
+  expect(screen.getByDisplayValue('Workflow externe')).toBeTruthy();
 });
