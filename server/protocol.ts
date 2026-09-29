@@ -11,7 +11,9 @@ export type ServerEvent =
   | { type: 'git.state'; git: GitState }
   | { type: 'context.usage'; usage: ContextUsage }
   | { type: 'cost.usage'; totalUsd: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'workflows.list'; workflows: WorkflowDefinition[] }
+  | { type: 'prompts.list'; prompts: PromptDefinition[] };
 
 export type ClientCommand =
   | { type: 'message.send'; text: string }
@@ -25,7 +27,11 @@ export type ClientCommand =
   | { type: 'permission.respond'; requestId: string; decision: 'allow' | 'always' | 'deny'; reason?: string }
   | { type: 'permission.revoke'; toolName: string }
   | { type: 'workflow.start'; workflowId: string }
-  | { type: 'workflow.resume'; checkpointId: string }
+  | { type: 'workflow.resume'; checkpointId: string; action: 'continue' | 'correct' }
+  | { type: 'workflow.save'; workflow: WorkflowDefinition }
+  | { type: 'workflow.delete'; id: string }
+  | { type: 'prompt.save'; prompt: PromptDefinition }
+  | { type: 'prompt.delete'; id: string }
   | { type: 'context.compact' }
   /** `detail: 'full'` : réservé à l'ouverture du popover de contexte, jamais au rafraîchissement de la jauge. */
   | { type: 'context.request-full' };
@@ -145,7 +151,20 @@ const COMMAND_VALIDATORS: Record<ClientCommand['type'], (v: Record<string, unkno
     (v.decision === 'allow' || v.decision === 'always' || v.decision === 'deny'),
   'permission.revoke': (v) => typeof v.toolName === 'string' && v.toolName.length > 0,
   'workflow.start': (v) => typeof v.workflowId === 'string',
-  'workflow.resume': (v) => typeof v.checkpointId === 'string',
+  'workflow.resume': (v) =>
+    typeof v.checkpointId === 'string' && (v.action === 'continue' || v.action === 'correct'),
+  'workflow.save': (v) =>
+    typeof v.workflow === 'object' &&
+    v.workflow !== null &&
+    typeof (v.workflow as Record<string, unknown>).id === 'string' &&
+    typeof (v.workflow as Record<string, unknown>).name === 'string',
+  'workflow.delete': (v) => typeof v.id === 'string',
+  'prompt.save': (v) =>
+    typeof v.prompt === 'object' &&
+    v.prompt !== null &&
+    typeof (v.prompt as Record<string, unknown>).id === 'string' &&
+    typeof (v.prompt as Record<string, unknown>).name === 'string',
+  'prompt.delete': (v) => typeof v.id === 'string',
   'context.compact': () => true,
   'context.request-full': () => true,
 };

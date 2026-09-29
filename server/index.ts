@@ -1,7 +1,7 @@
 import { createServer as createHttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseClientCommand, type ClientCommand, type ServerEvent } from './protocol.ts';
+import { parseClientCommand, type ClientCommand, type ServerEvent, type WorkflowDefinition, type PromptDefinition } from './protocol.ts';
 import type { RecentSession } from './session/recent.ts';
 
 export type ServerHandlers = {
@@ -75,17 +75,46 @@ export async function createServer(
   };
 }
 
+/**
+ * Enveloppe `emit` pour construire `waitForTurnEnd()` sans toucher à la signature publique de
+ * `SessionManager` (déjà testée par `manager.test.ts`) : broadcast l'événement normalement, et
+ * résout les attentes en cours quand le statut repasse à `'idle'`. Motif classique (liste de
+ * résolveurs vidée à chaque passage), utilitaire local, pas de module séparé pour si peu.
+ */
+function creerAttenteDeTour(broadcast: (e: ServerEvent) => void) {
+  let waiters: Array<() => void> = [];
+  const emit = (event: ServerEvent) => {
+    broadcast(event);
+    if (event.type === 'session.state' && event.state.status === 'idle') {
+      const toWake = waiters;
+      waiters = [];
+      for (const w of toWake) w();
+    }
+  };
+  const waitForTurnEnd = () => new Promise<void>((resolve) => waiters.push(resolve));
+  return { emit, waitForTurnEnd };
+}
+
 const isEntrypoint = /[\\/]index\.(ts|js)$/.test(process.argv[1] ?? '');
 if (isEntrypoint) {
   const { createSessionManager } = await import('./session/manager.ts');
   const { createPermissionStore } = await import('./session/permission-store.ts');
   const { createGitWatcher } = await import('./session/git-watcher.ts');
   const { listRecentSessions } = await import('./session/recent.ts');
+  const { listWorkflows, loadWorkflow, saveWorkflow, deleteWorkflow } = await import('./workflows/store.ts');
+  const { listPrompts, savePrompt, deletePrompt } = await import('./prompts/store.ts');
+  const { createWorkflowExecutor } = await import('./workflows/executor.ts');
   const { homedir } = await import('node:os');
   const { join } = await import('node:path');
 
   let manager: ReturnType<typeof createSessionManager> | null = null;
   let gitWatcher: ReturnType<typeof createGitWatcher> | null = null;
+  let activeExecutor: ReturnType<typeof createWorkflowExecutor> | null = null;
+
+  const workflowsDir = join(process.cwd(), '.claude-dashboard', 'workflows');
+  const promptsDir = join(process.cwd(), '.claude-dashboard', 'prompts');
+  let workflows: WorkflowDefinition[] = await listWorkflows(workflowsDir);
+  let prompts: PromptDefinition[] = await listPrompts(promptsDir);
 
   const server = await createServer(Number(process.env.PORT ?? 4317), {
     listSessions: async () => {
@@ -110,8 +139,58 @@ if (isEntrypoint) {
         send({ type: 'git.state', git: snapshot.git });
         send({ type: 'files.changed', files: snapshot.files });
       }
+      send({ type: 'workflows.list', workflows });
+      send({ type: 'prompts.list', prompts });
     },
     onCommand: (cmd) => {
+      if (cmd.type === 'workflow.save') {
+        void saveWorkflow(workflowsDir, cmd.workflow).then(async () => {
+          workflows = await listWorkflows(workflowsDir);
+          server.broadcast({ type: 'workflows.list', workflows });
+        });
+      }
+      if (cmd.type === 'workflow.delete') {
+        void deleteWorkflow(workflowsDir, cmd.id).then(async () => {
+          workflows = await listWorkflows(workflowsDir);
+          server.broadcast({ type: 'workflows.list', workflows });
+        });
+      }
+      if (cmd.type === 'prompt.save') {
+        void savePrompt(promptsDir, cmd.prompt).then(async () => {
+          prompts = await listPrompts(promptsDir);
+          server.broadcast({ type: 'prompts.list', prompts });
+        });
+      }
+      if (cmd.type === 'prompt.delete') {
+        void deletePrompt(promptsDir, cmd.id).then(async () => {
+          prompts = await listPrompts(promptsDir);
+          server.broadcast({ type: 'prompts.list', prompts });
+        });
+      }
+      if (cmd.type === 'workflow.start') {
+        if (!manager) return;
+        void loadWorkflow(workflowsDir, cmd.workflowId).then((workflow) => {
+          if (!workflow) {
+            server.broadcast({ type: 'error', message: `Workflow introuvable : ${cmd.workflowId}` });
+            return;
+          }
+          if (!manager) return;
+          // Un seul workflow actif à la fois : un nouveau `workflow.start` reçu pendant qu'un
+          // autre tourne remplace l'exécuteur précédent (décision documentée dans le rapport de
+          // la feature 06 — pas de file d'attente, pas d'erreur, le plus simple des deux options).
+          activeExecutor = createWorkflowExecutor({
+            applyRuntime: manager.applyRuntime,
+            send: manager.send,
+            waitForTurnEnd,
+            emitCheckpoint: (checkpoint) => server.broadcast({ type: 'workflow.checkpoint', checkpoint }),
+          });
+          void activeExecutor.start(workflow);
+        });
+      }
+      if (cmd.type === 'workflow.resume') {
+        if (cmd.action === 'continue') void activeExecutor?.continueAfterGate();
+        if (cmd.action === 'correct') activeExecutor?.correctAtGate();
+      }
       if (!manager) return;
       if (cmd.type === 'message.send') manager.send(cmd.text);
       if (cmd.type === 'session.interrupt') {
@@ -148,10 +227,11 @@ if (isEntrypoint) {
   });
 
   const store = await createPermissionStore(process.cwd());
+  const { emit, waitForTurnEnd } = creerAttenteDeTour((event) => server.broadcast(event));
 
   manager = createSessionManager({
     cwd: process.cwd(),
-    emit: (event) => server.broadcast(event),
+    emit,
     store,
   });
 
