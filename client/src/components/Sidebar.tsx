@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { ChangedFile, PromptDefinition } from '../../../server/protocol.ts';
+import type { ChangedFile, PromptDefinition, WorkflowDefinition } from '../../../server/protocol.ts';
 import { PromptLibrary } from './PromptLibrary.tsx';
+import { WorkflowEditor } from './WorkflowEditor.tsx';
 
 export type SidebarColumn = 'accueil' | 'skills' | 'lancer';
 
@@ -17,6 +18,11 @@ export type SidebarProps = {
   onSavePrompt: (prompt: PromptDefinition) => void;
   onDeletePrompt: (id: string) => void;
   onTogglePinPrompt: (id: string) => void;
+  workflows: WorkflowDefinition[];
+  availableModels: { value: string; displayName: string }[];
+  onSaveWorkflow: (workflow: WorkflowDefinition) => void;
+  onDeleteWorkflow: (id: string) => void;
+  onLaunchWorkflow: (workflowId: string) => void;
 };
 
 function useCollapsed(id: string, defaultCollapsed: boolean) {
@@ -206,7 +212,25 @@ export function Sidebar(props: SidebarProps) {
             <div style={{ color: 'var(--text-faint)' }}>Fan-out — désactivé en v1</div>
           </Section>
           <Section id="workflows" title="Workflows" defaultCollapsed={false}>
-            <div style={{ color: 'var(--text-faint)' }}>Workflows — à venir</div>
+            {props.workflows.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                {props.workflows.map((w) => (
+                  <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{w.name}</span>
+                    <button type="button" className="pill" onClick={() => props.onLaunchWorkflow(w.id)}>
+                      Lancer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <WorkflowEditor
+              workflows={props.workflows}
+              availableModels={props.availableModels}
+              availableAgents={props.availableAgents}
+              onSave={props.onSaveWorkflow}
+              onDelete={props.onDeleteWorkflow}
+            />
           </Section>
         </>
       )}

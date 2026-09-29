@@ -4,9 +4,11 @@ import type {
   GitState,
   GrantedPermission,
   PermissionRequest,
+  PromptDefinition,
   ServerEvent,
   SessionState,
   WorkflowCheckpoint,
+  WorkflowDefinition,
 } from '../../server/protocol.ts';
 
 export type ChatMessage = {
@@ -54,6 +56,8 @@ export type AppState = {
   availableAgents: SessionState['availableAgents'];
   mcpServers: SessionState['mcpServers'];
   cwd: string;
+  workflows: WorkflowDefinition[];
+  prompts: PromptDefinition[];
 };
 
 export const initialState: AppState = {
@@ -75,6 +79,8 @@ export const initialState: AppState = {
   availableAgents: [],
   mcpServers: [],
   cwd: '',
+  workflows: [],
+  prompts: [],
 };
 
 export function reduceEvent(state: AppState, event: ServerEvent): AppState {
@@ -173,6 +179,12 @@ export function reduceEvent(state: AppState, event: ServerEvent): AppState {
 
     case 'files.changed':
       return { ...state, changedFiles: event.files };
+
+    case 'workflows.list':
+      return { ...state, workflows: event.workflows };
+
+    case 'prompts.list':
+      return { ...state, prompts: event.prompts };
 
     case 'workflow.checkpoint': {
       const { checkpoint } = event;

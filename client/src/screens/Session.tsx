@@ -8,6 +8,7 @@ import { GeneratingIndicator } from '../components/GeneratingIndicator.tsx';
 import { PendingApprovalBar } from '../components/PendingApprovalBar.tsx';
 import { Sidebar, type SidebarColumn } from '../components/Sidebar.tsx';
 import { ContextPopover } from '../components/ContextPopover.tsx';
+import { CommandPalette, type PaletteItem } from '../components/CommandPalette.tsx';
 import { Settings } from './Settings.tsx';
 import { connect, type Connection } from '../socket.ts';
 import { initialState, reduceEvent, type ApprovalEntry } from '../state.ts';
@@ -30,6 +31,7 @@ export function Session() {
   const [screen, setScreen] = useState<'session' | 'settings'>('session');
   const [sidebarColumn, setSidebarColumn] = useState<SidebarColumn>('accueil');
   const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const pendingApprovals = state.thread.filter(
     (e): e is ApprovalEntry => e.kind === 'approval' && e.decision === null
   );
@@ -49,8 +51,37 @@ export function Session() {
     return () => window.removeEventListener('keydown', onKey);
   }, [screen, state.status]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const set = (reglage: 'model' | 'effort' | 'permissionMode') => (value: string) =>
     connection.current?.send({ type: 'runtime.set', [reglage]: value });
+
+  const paletteItems: PaletteItem[] = [
+    ...state.prompts.map((p) => ({ id: `prompt-${p.id}`, type: 'prompt' as const, label: p.name, description: p.text })),
+    ...state.availableCommands.map((c) => ({ id: `skill-${c.name}`, type: 'skill' as const, label: c.name, description: c.description })),
+    ...state.availableAgents.map((a) => ({ id: `subagent-${a.name}`, type: 'subagent' as const, label: a.name, description: a.description })),
+  ];
+
+  const onPaletteSelect = (item: PaletteItem) => {
+    if (item.type === 'prompt') {
+      const prompt = state.prompts.find((p) => `prompt-${p.id}` === item.id);
+      if (prompt) connection.current?.send({ type: 'message.send', text: prompt.text });
+    } else if (item.type === 'skill') {
+      connection.current?.send({ type: 'message.send', text: `/${item.label}` });
+    } else {
+      connection.current?.send({ type: 'message.send', text: `@${item.label}` });
+    }
+    setPaletteOpen(false);
+  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -89,11 +120,19 @@ export function Session() {
           availableCommands={state.availableCommands}
           availableAgents={state.availableAgents}
           mcpServers={state.mcpServers}
-          prompts={[]}
-          onLaunchPrompt={() => {}}
-          onSavePrompt={() => {}}
-          onDeletePrompt={() => {}}
-          onTogglePinPrompt={() => {}}
+          prompts={state.prompts}
+          onLaunchPrompt={(p) => connection.current?.send({ type: 'message.send', text: p.text })}
+          onSavePrompt={(p) => connection.current?.send({ type: 'prompt.save', prompt: p })}
+          onDeletePrompt={(id) => connection.current?.send({ type: 'prompt.delete', id })}
+          onTogglePinPrompt={(id) => {
+            const p = state.prompts.find((x) => x.id === id);
+            if (p) connection.current?.send({ type: 'prompt.save', prompt: { ...p, pinned: !p.pinned } });
+          }}
+          workflows={state.workflows}
+          availableModels={state.availableModels}
+          onSaveWorkflow={(w) => connection.current?.send({ type: 'workflow.save', workflow: w })}
+          onDeleteWorkflow={(id) => connection.current?.send({ type: 'workflow.delete', id })}
+          onLaunchWorkflow={(workflowId) => connection.current?.send({ type: 'workflow.start', workflowId })}
         />
         <main role="main" style={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
         {screen === 'settings' ? (
@@ -118,10 +157,9 @@ export function Session() {
               onDecide={(requestId, decision, reason) =>
                 connection.current?.send({ type: 'permission.respond', requestId, decision, reason })
               }
-              // TODO couture feature 06 : aucun ClientCommand pour la barrière n'existe encore
-              // côté protocole (workflow.resume ne couvre que la reprise, pas "corriger"). Câblage
-              // réel laissé à la feature qui introduira ce canal.
-              onWorkflowGateAction={() => {}}
+              onWorkflowGateAction={(checkpointId, action) =>
+                connection.current?.send({ type: 'workflow.resume', checkpointId, action })
+              }
             />
             {state.status === 'generating' && (
               <GeneratingIndicator
@@ -186,6 +224,12 @@ export function Session() {
         usage={state.contextUsage}
         onCompact={() => connection.current?.send({ type: 'context.compact' })}
         onClose={() => setContextPopoverOpen(false)}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        items={paletteItems}
+        onSelect={onPaletteSelect}
+        onClose={() => setPaletteOpen(false)}
       />
     </div>
   );
